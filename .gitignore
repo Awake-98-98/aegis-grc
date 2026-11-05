@@ -1,0 +1,33 @@
+# Local environment and runtime output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime data: the SQLite database and backups never enter the repository
+data/
+aegis-data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+backups/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local.toml
+
+# Logs and editor files
+logs/
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
