@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}错误 {{ status }}{% endblock %}
+{% block auth_content %}
+<h2>请求未完成（{{ status }}）</h2>
+<p class="muted">{{ error.message }}</p>
+<p class="mono small">错误码：{{ error.code }}{% if error.details %} · {{ error.details }}{% endif %}</p>
+<p class="mono small">请求编号：{{ request_id }}</p>
+<div class="form-actions">
+  <a class="button" href="/">返回工作台</a>
+  <a class="button" href="/login">重新登录</a>
+</div>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }}{% endblock %}
+{% block eyebrow %}客户台账 · {{ client.code }}{% endblock %}
+{% block heading %}{{ client.name }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <span class="badge badge-{{ client.status }}">{{ client_status_labels.get(client.status, client.status) }}</span>
+  <div class="spacer"></div>
+  {% if can(current_user.role, 'engagement:write') %}
+  <a class="button primary" href="/engagements/new?client_id={{ client.id }}">为该客户新建项目</a>
+  {% endif %}
+  {% if can(current_user.role, 'client:write') %}
+  <a class="button" href="/clients/{{ client.id }}/edit">编辑客户</a>
+  {% endif %}
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head"><h3>客户档案</h3></div>
+    <dl class="facts">
+      <dt>编号</dt><dd class="mono">{{ client.code }}</dd>
+      <dt>行业</dt><dd>{{ client.industry or '-' }}</dt>
+      <dt>联系人</dt><dd>{{ client.contact_name or '-' }}</dd>
+      <dt>邮箱</dt><dd>{{ client.contact_email or '-' }}</dd>
+      <dt>电话</dt><dd>{{ client.contact_phone or '-' }}</dd>
+      <dt>建档</dt><dd>{{ client.created_at | short_time }}</dd>
+    </dl>
+    {% if client.notes %}<p class="notes">{{ client.notes }}</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>咨询项目</h3><span class="mono small">{{ engagements | length }}</span></div>
+    {% if engagements %}
+    <table class="table compact">
+      <thead><tr><th>项目</th><th>状态</th><th>周期</th></tr></thead>
+      <tbody>
+      {% for item in engagements %}
+        <tr>
+          <td><a href="/engagements/{{ item.id }}">{{ item.name }}</a><br><span class="mono small">{{ item.code }}</span></td>
+          <td><span class="badge">{{ status_labels.get(item.status, item.status) }}</span></td>
+          <td class="small muted">{{ item.start_date or '-' }} → {{ item.end_date or '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">该客户暂无咨询项目。</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h3>客户变更轨迹</h3><span class="muted small">来自审计日志</span></div>
+  {% if timeline %}
+  <ul class="timeline">
+    {% for event in timeline %}
+    <li>
+      <span class="dot"></span>
+      <div>
+        <p>{{ event.summary }}</p>
+        <small>{{ event.actor_email }} · {{ event.created_at | short_time }} · <span class="mono">{{ event.action }}</span></small>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">暂无变更记录。</p>
+  {% endif %}
+</section>
+{% endblock %}

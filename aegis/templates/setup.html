@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}初始化{% endblock %}
+{% block auth_content %}
+<h2>初始化工作台</h2>
+<p class="muted">第一次使用需要创建管理员。该账号拥有成员管理权限。</p>
+<form method="post" action="/setup" class="stack">
+  <label>邮箱
+    <input type="email" name="email" autocomplete="username" required autofocus>
+  </label>
+  <label>显示名称
+    <input type="text" name="display_name" maxlength="120" required>
+  </label>
+  <label>密码
+    <input type="password" name="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+  </label>
+  <p class="hint">至少 10 位，需同时包含字母与数字。</p>
+  <button class="button primary" type="submit">创建管理员并进入</button>
+</form>
+{% endblock %}

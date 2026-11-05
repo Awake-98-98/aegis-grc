@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}审计轨迹{% endblock %}
+{% block eyebrow %}审计{% endblock %}
+{% block heading %}操作审计轨迹{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" action="/audit" class="inline-form">
+    <select name="entity_type">
+      <option value="">全部对象</option>
+      {% for value, label in [('user','用户'),('client','客户'),('engagement','项目'),('stakeholder','干系人'),('auth','认证')] %}
+      <option value="{{ value }}" {{ 'selected' if entity_type == value else '' }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <input type="search" name="action" value="{{ action }}" placeholder="动作，如 client.update">
+    <button class="button" type="submit">筛选</button>
+  </form>
+  <span class="muted small">共 {{ total }} 条</span>
+</div>
+
+<section class="card">
+  {% if events %}
+  <table class="table">
+    <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>对象</th><th>摘要</th><th>来源 IP</th></tr></thead>
+    <tbody>
+    {% for event in events %}
+      <tr>
+        <td class="mono small">{{ event.created_at | short_time }}</td>
+        <td class="small">{{ event.actor_email or '-' }}</td>
+        <td class="mono small">{{ event.action }}</td>
+        <td class="small">{{ event.entity_type }}{% if event.entity_id %}<br><span class="mono muted">{{ event.entity_id[:8] }}</span>{% endif %}</td>
+        <td>{{ event.summary }}</td>
+        <td class="mono small">{{ event.ip or '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pager">
+    {% if page > 1 %}<a class="button" href="/audit?entity_type={{ entity_type }}&action={{ action }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="mono small">{{ page }} / {{ pages if pages else 1 }}</span>
+    {% if page < pages %}<a class="button" href="/audit?entity_type={{ entity_type }}&action={{ action }}&page={{ page + 1 }}">下一页</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">没有符合条件的审计记录。</p>
+  {% endif %}
+</section>
+{% endblock %}

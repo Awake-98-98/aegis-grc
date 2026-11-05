@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}咨询项目{% endblock %}
+{% block eyebrow %}咨询项目{% endblock %}
+{% block heading %}项目组合{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" action="/engagements" class="inline-form">
+    <input type="search" name="q" value="{{ q }}" placeholder="搜索项目名称 / 编号">
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for item in statuses %}
+      <option value="{{ item }}" {{ 'selected' if status == item else '' }}>{{ status_labels.get(item, item) }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">筛选</button>
+  </form>
+  {% if can(current_user.role, 'engagement:write') %}
+  <a class="button primary" href="/engagements/new">新建项目</a>
+  {% endif %}
+</div>
+
+<section class="card">
+  {% if engagements %}
+  <table class="table">
+    <thead><tr><th>编号</th><th>项目</th><th>客户</th><th>类型</th><th>状态</th><th>周期</th><th>更新</th></tr></thead>
+    <tbody>
+    {% for item in engagements %}
+      <tr>
+        <td class="mono">{{ item.code }}</td>
+        <td><a href="/engagements/{{ item.id }}">{{ item.name }}</a></td>
+        <td>{{ item.client.name if item.client else '-' }}</td>
+        <td>{{ type_labels.get(item.engagement_type, item.engagement_type) }}</td>
+        <td><span class="badge badge-{{ item.status }}">{{ status_labels.get(item.status, item.status) }}</span></td>
+        <td class="small muted">{{ item.start_date or '-' }} → {{ item.end_date or '-' }}</td>
+        <td class="muted small">{{ item.updated_at | short_time }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pager">
+    <span class="muted small">共 {{ total }} 条</span>
+    {% if page > 1 %}<a class="button" href="/engagements?q={{ q }}&status={{ status }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="mono small">{{ page }} / {{ pages if pages else 1 }}</span>
+    {% if page < pages %}<a class="button" href="/engagements?q={{ q }}&status={{ status }}&page={{ page + 1 }}">下一页</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">还没有咨询项目。{% if can(current_user.role, 'engagement:write') %}<a href="/engagements/new">新建第一个项目</a>{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

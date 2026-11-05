@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑项目' if mode == 'edit' else '新建项目' }}{% endblock %}
+{% block eyebrow %}咨询项目{% endblock %}
+{% block heading %}{{ '编辑项目' if mode == 'edit' else '新建项目' }}{% endblock %}
+{% block content %}
+<section class="card">
+  <form method="post" action="{{ form_action }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>所属客户
+      <select name="client_id" {{ 'disabled' if mode == 'edit' else '' }} required>
+        <option value="">选择客户</option>
+        {% for item in clients %}
+        <option value="{{ item.id }}" {{ 'selected' if selected_client_id == item.id else '' }}>{{ item.code }} · {{ item.name }}</option>
+        {% endfor %}
+      </select>
+      {% if mode == 'edit' %}<span class="hint">项目归属客户创建后不可更改。</span>{% endif %}
+    </label>
+    <label>项目名称
+      <input type="text" name="name" maxlength="200" required value="{{ engagement.name if engagement else '' }}">
+    </label>
+    <label>项目类型
+      <select name="engagement_type">
+        {% for item in types %}
+        <option value="{{ item }}" {{ 'selected' if engagement and engagement.engagement_type == item else '' }}>{{ type_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>项目负责人
+      <select name="lead_user_id">
+        <option value="">未指定</option>
+        {% for item in users %}
+        <option value="{{ item.id }}" {{ 'selected' if engagement and engagement.lead_user_id == item.id else '' }}>{{ item.display_name }}（{{ item.role }}）</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>开始日期
+      <input type="date" name="start_date" value="{{ engagement.start_date if engagement and engagement.start_date else '' }}">
+    </label>
+    <label>结束日期
+      <input type="date" name="end_date" value="{{ engagement.end_date if engagement and engagement.end_date else '' }}">
+    </label>
+    <label class="span-2">范围与边界
+      <textarea name="scope_summary" rows="4" maxlength="4000">{{ engagement.scope_summary if engagement else '' }}</textarea>
+    </label>
+    <label class="span-2">评估目标
+      <textarea name="objectives" rows="3" maxlength="4000">{{ engagement.objectives if engagement else '' }}</textarea>
+    </label>
+    <div class="form-actions span-2">
+      <button class="button primary" type="submit">保存</button>
+      <a class="button" href="{{ '/engagements/' + engagement.id if engagement else '/engagements' }}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

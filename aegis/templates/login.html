@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}登录{% endblock %}
+{% block auth_content %}
+<h2>登录工作台</h2>
+<p class="muted">使用账号进入客户与项目台账。</p>
+<form method="post" action="/login" class="stack">
+  <label>邮箱
+    <input type="email" name="email" autocomplete="username" required autofocus>
+  </label>
+  <label>密码
+    <input type="password" name="password" autocomplete="current-password" required>
+  </label>
+  <button class="button primary" type="submit">登录</button>
+</form>
+<p class="muted small">尚未初始化？<a href="/setup">创建初始管理员</a></p>
+{% endblock %}

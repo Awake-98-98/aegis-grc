@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AegisGRC{% endblock %} · AegisGRC</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% if current_user %}
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">A</span>
+      <div>
+        <strong>AegisGRC</strong>
+        <small>安全风险咨询工作台</small>
+      </div>
+    </div>
+    <nav class="nav">
+      <a class="nav-item {{ 'active' if nav == 'dashboard' else '' }}" href="/">工作台</a>
+      <a class="nav-item {{ 'active' if nav == 'clients' else '' }}" href="/clients">客户台账</a>
+      <a class="nav-item {{ 'active' if nav == 'engagements' else '' }}" href="/engagements">咨询项目</a>
+      <a class="nav-item {{ 'active' if nav == 'audit' else '' }}" href="/audit">审计轨迹</a>
+      {% if current_user.role == 'admin' %}
+      <a class="nav-item {{ 'active' if nav == 'users' else '' }}" href="/users">成员与角色</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-foot">
+      <div class="env-tag">{{ settings.environment }}</div>
+      <a class="nav-item {{ 'active' if nav == 'account' else '' }}" href="/account">账号设置</a>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="link-button" type="submit">退出登录</button>
+      </form>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">{% block eyebrow %}安全风险咨询{% endblock %}</span>
+        <h1>{% block heading %}{% endblock %}</h1>
+      </div>
+      <div class="who">
+        <span class="avatar">{{ current_user.display_name[:1] }}</span>
+        <div>
+          <strong>{{ current_user.display_name }}</strong>
+          <small>{{ current_user.role }} · {{ current_user.email }}</small>
+        </div>
+      </div>
+    </header>
+    <section class="content">
+      {% block content %}{% endblock %}
+    </section>
+  </main>
+</div>
+{% else %}
+<div class="auth-shell">
+  <div class="auth-panel">
+    <div class="brand brand-auth">
+      <span class="brand-mark">A</span>
+      <div>
+        <strong>AegisGRC</strong>
+        <small>安全风险咨询工作台</small>
+      </div>
+    </div>
+    {% block auth_content %}{% endblock %}
+  </div>
+  <p class="auth-foot">本地部署 · 数据不出机 · {{ settings.environment }}</p>
+</div>
+{% endif %}
+<script src="/static/app.js"></script>
+</body>
+</html>

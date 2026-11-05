@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}成员与角色{% endblock %}
+{% block eyebrow %}治理{% endblock %}
+{% block heading %}成员与角色{% endblock %}
+{% block content %}
+<div class="split">
+  <section class="card">
+    <div class="card-head"><h3>现有成员</h3><span class="mono small">{{ users | length }}</span></div>
+    <table class="table compact">
+      <thead><tr><th>成员</th><th>角色</th><th>状态</th><th></th></tr></thead>
+      <tbody>
+      {% for user in users %}
+        <tr>
+          <td>{{ user.display_name }}<br><span class="muted small">{{ user.email }}</span></td>
+          <td>
+            <form method="post" action="/users/{{ user.id }}/update" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <select name="role">
+                {% for role in ['admin','consultant','viewer'] %}
+                <option value="{{ role }}" {{ 'selected' if user.role == role else '' }}>{{ role }}</option>
+                {% endfor %}
+              </select>
+              <select name="is_active">
+                <option value="1" {{ 'selected' if user.is_active else '' }}>启用</option>
+                <option value="0" {{ 'selected' if not user.is_active else '' }}>停用</option>
+              </select>
+              <button class="link-button" type="submit">保存</button>
+            </form>
+          </td>
+          <td>{{ '启用' if user.is_active else '停用' }}</td>
+          <td class="muted small">{{ user.last_login_at | short_time if user.last_login_at else '未登录' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">末位启用管理员不可被降级或停用；停用成员会立即吊销其全部会话。</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>新增成员</h3></div>
+    <form method="post" action="/users" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>邮箱<input type="email" name="email" maxlength="254" required></label>
+      <label>显示名称<input type="text" name="display_name" maxlength="120" required></label>
+      <label>初始密码<input type="password" name="password" minlength="10" maxlength="128" required></label>
+      <label>角色
+        <select name="role">
+          <option value="consultant">consultant · 读写客户与项目</option>
+          <option value="viewer">viewer · 只读</option>
+          <option value="admin">admin · 全部权限</option>
+        </select>
+      </label>
+      <button class="button primary" type="submit">创建成员</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

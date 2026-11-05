@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑客户' if mode == 'edit' else '新建客户' }}{% endblock %}
+{% block eyebrow %}客户台账{% endblock %}
+{% block heading %}{{ '编辑客户' if mode == 'edit' else '新建客户' }}{% endblock %}
+{% block content %}
+<section class="card">
+  <form method="post" action="{{ form_action }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="span-2">客户名称
+      <input type="text" name="name" maxlength="200" required value="{{ client.name if client else '' }}">
+    </label>
+    <label>客户编号
+      <input type="text" name="code" maxlength="32" value="{{ client.code if client else '' }}" {{ 'readonly' if mode == 'edit' else '' }} placeholder="留空自动生成">
+    </label>
+    <label>所属行业
+      <input type="text" name="industry" maxlength="120" value="{{ client.industry if client else '' }}">
+    </label>
+    <label>状态
+      <select name="status">
+        {% for item in statuses %}
+        <option value="{{ item }}" {{ 'selected' if client and client.status == item else '' }}>{{ client_status_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>联系人
+      <input type="text" name="contact_name" maxlength="120" value="{{ client.contact_name if client else '' }}">
+    </label>
+    <label>联系邮箱
+      <input type="email" name="contact_email" maxlength="254" value="{{ client.contact_email if client else '' }}">
+    </label>
+    <label>联系电话
+      <input type="text" name="contact_phone" maxlength="64" value="{{ client.contact_phone if client else '' }}">
+    </label>
+    <label class="span-2">备注
+      <textarea name="notes" rows="4" maxlength="4000">{{ client.notes if client else '' }}</textarea>
+    </label>
+    <div class="form-actions span-2">
+      <button class="button primary" type="submit">保存</button>
+      <a class="button" href="{{ '/clients/' + client.id if client else '/clients' }}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

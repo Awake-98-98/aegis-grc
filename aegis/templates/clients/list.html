@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}客户台账{% endblock %}
+{% block eyebrow %}客户台账{% endblock %}
+{% block heading %}客户与委托关系{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <form method="get" action="/clients" class="inline-form">
+    <input type="search" name="q" value="{{ q }}" placeholder="搜索名称 / 编号 / 行业">
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for item in statuses %}
+      <option value="{{ item }}" {{ 'selected' if status == item else '' }}>{{ client_status_labels.get(item, item) }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">筛选</button>
+  </form>
+  {% if can(current_user.role, 'client:write') %}
+  <a class="button primary" href="/clients/new">新建客户</a>
+  {% endif %}
+</div>
+
+<section class="card">
+  {% if clients %}
+  <table class="table">
+    <thead><tr><th>编号</th><th>客户</th><th>行业</th><th>联系人</th><th>状态</th><th>项目</th><th>更新</th></tr></thead>
+    <tbody>
+    {% for client in clients %}
+      <tr>
+        <td class="mono">{{ client.code }}</td>
+        <td><a href="/clients/{{ client.id }}">{{ client.name }}</a></td>
+        <td>{{ client.industry or '-' }}</td>
+        <td>{{ client.contact_name or '-' }}<br><span class="muted small">{{ client.contact_email }}</span></td>
+        <td><span class="badge badge-{{ client.status }}">{{ client_status_labels.get(client.status, client.status) }}</span></td>
+        <td class="mono">{{ counts.get(client.id, 0) }}</td>
+        <td class="muted small">{{ client.updated_at | short_time }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pager">
+    <span class="muted small">共 {{ total }} 条</span>
+    {% if page > 1 %}<a class="button" href="/clients?q={{ q }}&status={{ status }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="mono small">{{ page }} / {{ pages if pages else 1 }}</span>
+    {% if page < pages %}<a class="button" href="/clients?q={{ q }}&status={{ status }}&page={{ page + 1 }}">下一页</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">没有符合条件的客户。{% if can(current_user.role, 'client:write') %}<a href="/clients/new">新建第一个客户</a>{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

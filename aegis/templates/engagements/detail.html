@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ engagement.name }}{% endblock %}
+{% block eyebrow %}咨询项目 · {{ engagement.code }}{% endblock %}
+{% block heading %}{{ engagement.name }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <span class="badge badge-{{ engagement.status }}">{{ status_labels.get(engagement.status, engagement.status) }}</span>
+  <span class="muted small">{{ type_labels.get(engagement.engagement_type, engagement.engagement_type) }}</span>
+  <div class="spacer"></div>
+  {% if can(current_user.role, 'engagement:write') %}
+  <a class="button" href="/engagements/{{ engagement.id }}/edit">编辑项目</a>
+  {% endif %}
+  <a class="button" href="/clients/{{ engagement.client_id }}">查看客户</a>
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head"><h3>项目档案</h3></div>
+    <dl class="facts">
+      <dt>客户</dt><dd>{{ engagement.client.name if engagement.client else '-' }}</dd>
+      <dt>负责人</dt><dd>{{ lead.display_name if lead else '未指定' }}</dd>
+      <dt>周期</dt><dd>{{ engagement.start_date or '-' }} → {{ engagement.end_date or '-' }}</dd>
+      <dt>创建</dt><dd>{{ engagement.created_at | short_time }}</dd>
+    </dl>
+    <h4>范围与边界</h4>
+    <p class="notes">{{ engagement.scope_summary or '尚未填写。' }}</p>
+    <h4>评估目标</h4>
+    <p class="notes">{{ engagement.objectives or '尚未填写。' }}</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>阶段推进</h3></div>
+    <p class="muted small">当前阶段：{{ status_labels.get(engagement.status, engagement.status) }}</p>
+    {% if can(current_user.role, 'engagement:write') and next_statuses %}
+    <form method="post" action="/engagements/{{ engagement.id }}/transition" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>目标阶段
+        <select name="status">
+          {% for item in next_statuses %}
+          <option value="{{ item }}">{{ status_labels.get(item, item) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>变更说明
+        <input type="text" name="note" maxlength="500" placeholder="可选，会写入审计轨迹">
+      </label>
+      <button class="button primary" type="submit">推进阶段</button>
+    </form>
+    {% elif not next_statuses %}
+    <p class="empty">已归档，无可用阶段流转。</p>
+    {% else %}
+    <p class="muted small">当前角色只读，无法推进阶段。</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h3>关键干系人</h3><span class="mono small">{{ stakeholders | length }}</span></div>
+  {% if stakeholders %}
+  <table class="table compact">
+    <thead><tr><th>姓名</th><th>角色</th><th>组织</th><th>影响力</th><th>关注度</th><th></th></tr></thead>
+    <tbody>
+    {% for item in stakeholders %}
+      <tr>
+        <td>{{ item.name }}<br><span class="muted small">{{ item.email }}</span></td>
+        <td>{{ item.role_title or '-' }}</td>
+        <td>{{ item.organization or '-' }}</td>
+        <td>{{ level_labels.get(item.influence, item.influence) }}</td>
+        <td>{{ level_labels.get(item.interest, item.interest) }}</td>
+        <td class="right">
+          {% if can(current_user.role, 'stakeholder:write') %}
+          <form method="post" action="/stakeholders/{{ item.id }}/delete" class="inline" data-confirm="确认删除该干系人？">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="link-button danger" type="submit">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">尚未登记干系人。</p>
+  {% endif %}
+
+  {% if can(current_user.role, 'stakeholder:write') %}
+  <form method="post" action="/engagements/{{ engagement.id }}/stakeholders" class="grid-form compact-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>姓名<input type="text" name="name" maxlength="120" required></label>
+    <label>角色<input type="text" name="role_title" maxlength="120"></label>
+    <label>组织<input type="text" name="organization" maxlength="200"></label>
+    <label>邮箱<input type="email" name="email" maxlength="254"></label>
+    <label>影响力
+      <select name="influence">{% for item in levels %}<option value="{{ item }}" {{ 'selected' if item == 'medium' else '' }}>{{ level_labels.get(item, item) }}</option>{% endfor %}</select>
+    </label>
+    <label>关注度
+      <select name="interest">{% for item in levels %}<option value="{{ item }}" {{ 'selected' if item == 'medium' else '' }}>{{ level_labels.get(item, item) }}</option>{% endfor %}</select>
+    </label>
+    <div class="form-actions span-2">
+      <button class="button" type="submit">登记干系人</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head"><h3>项目轨迹</h3><span class="muted small">阶段变更与档案修改</span></div>
+  {% if timeline %}
+  <ul class="timeline">
+    {% for event in timeline %}
+    <li>
+      <span class="dot"></span>
+      <div>
+        <p>{{ event.summary }}</p>
+        <small>{{ event.actor_email }} · {{ event.created_at | short_time }} · <span class="mono">{{ event.action }}</span></small>
+        {% if event.detail.get('note') %}<p class="muted small">说明：{{ event.detail.get('note') }}</p>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">暂无轨迹记录。</p>
+  {% endif %}
+</section>
+{% endblock %}

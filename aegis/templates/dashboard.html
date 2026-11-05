@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}工作台{% endblock %}
+{% block eyebrow %}今日概览{% endblock %}
+{% block heading %}咨询工作台{% endblock %}
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">客户总数</span>
+    <strong class="stat-value">{{ summary.clients.total }}</strong>
+    <small>在服务 {{ summary.clients.active }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">咨询项目</span>
+    <strong class="stat-value">{{ summary.engagements.total }}</strong>
+    <small>进行中 {{ summary.engagements.active }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">待结项</span>
+    <strong class="stat-value">{{ summary.engagements.by_status.get('reporting', 0) }}</strong>
+    <small>报告编制阶段</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">潜在客户</span>
+    <strong class="stat-value">{{ summary.clients.by_status.get('prospect', 0) }}</strong>
+    <small>待转化</small>
+  </div>
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head">
+      <h3>近期到期项目</h3>
+      <a class="quiet" href="/engagements">全部项目</a>
+    </div>
+    {% if summary.upcoming %}
+    <table class="table">
+      <thead><tr><th>项目</th><th>客户</th><th>状态</th><th>结束日期</th></tr></thead>
+      <tbody>
+      {% for item in summary.upcoming %}
+        <tr>
+          <td><a href="/engagements/{{ item.id }}">{{ item.name }}</a><br><span class="mono small">{{ item.code }}</span></td>
+          <td>{{ item.client.name if item.client else '-' }}</td>
+          <td><span class="badge">{{ status_labels.get(item.status, item.status) }}</span></td>
+          <td>{{ item.end_date }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">暂无临近结束日期的进行中项目。</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h3>状态分布</h3>
+      <a class="quiet" href="/audit">审计轨迹</a>
+    </div>
+    <div class="dist">
+      {% for status, label in status_labels.items() %}
+      <div class="dist-row">
+        <span>{{ label }}</span>
+        <div class="bar"><i style="width: {{ (100 * engagement_labels.get(status, 0) / summary.engagements.total) if summary.engagements.total else 0 }}%"></i></div>
+        <span class="mono">{{ engagement_labels.get(status, 0) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>最近操作</h3>
+    <span class="muted small">所有写操作均留痕</span>
+  </div>
+  {% if summary.recent_events %}
+  <ul class="timeline">
+    {% for event in summary.recent_events %}
+    <li>
+      <span class="dot"></span>
+      <div>
+        <p>{{ event.summary }}</p>
+        <small>{{ event.actor_email }} · {{ event.created_at | short_time }} · <span class="mono">{{ event.action }}</span></small>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">还没有操作记录。</p>
+  {% endif %}
+</section>
+{% endblock %}
