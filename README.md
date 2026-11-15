@@ -1,21 +1,21 @@
 # AegisGRC
 
-> 安全风险咨询工作台 —— 把咨询项目的客户、项目、干系人、审计留痕收进一个可离线运行的单机系统。
+> 安全风险咨询工作台：把咨询项目的客户、资产、项目进度和审计留痕收进一个可离线运行的单机系统。
 
-AegisGRC 面向独立安全顾问与小团队咨询方：不需要云服务、不需要外部数据库，一条命令初始化后即可在浏览器里管理客户主档、咨询项目生命周期和全过程审计。项目采用 MIT 协议开源。
+AegisGRC 面向独立安全顾问与小团队咨询方：不需要云服务、不需要外部数据库，一条命令初始化后即可在浏览器里管理客户主档、咨询项目、资产清单与全过程审计。项目采用 MIT 协议开源。
 
 ## 当前进度
 
 | 里程碑 | 范围 | 状态 |
 |---|---|---|
-| M1 | 平台基座：数据库迁移、认证与 RBAC、审计、客户/项目/干系人、Web 控制台、CLI | ✅ 已完成 |
-| M2 | 资产与风险登记册：资产清单、风险矩阵、风险处置计划 | 规划中 |
-| M3 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 规划中 |
-| M4 | 访谈与证据：访谈记录、证据附件、发现项台账 | 规划中 |
-| M5 | 报告与交付：报告生成、整改跟踪、客户门户 | 规划中 |
-| M6 | 运营化：备份恢复、导入导出、指标看板、加固与发布 | 规划中 |
+| M1 | 平台基座：数据库迁移、认证与 RBAC、审计、客户/项目/干系人、Web 控制台、CLI | 已完成 |
+| M2 | 资产与威胁面：资产清单、CIA 分级、威胁目录、资产威胁配对、CSV 导入导出 | 已完成 |
+| M3 | 风险评估：可能性与影响矩阵、固有/剩余风险、处置策略 | 规划中 |
+| M4 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 规划中 |
+| M5 | 访谈、证据与整改：访谈记录、证据附件、整改任务 | 规划中 |
+| M6 | 报告与运营：报告生成、备份恢复、指标看板、加固与发布 | 规划中 |
 
-M1 只做"底座 + 主档"，不提前实现资产/风险/控制/报告，保证每个里程碑边界清晰、可验收。
+每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，风险评分留给 M3。
 
 ## 快速开始
 
@@ -50,6 +50,10 @@ aegis status           # 查看 schema 版本、各表记录数与数据库位�
 aegis create-user --email a@b.c --display-name "顾问甲" --role consultant
 aegis prune-sessions   # 清理过期/已吊销会话
 aegis serve --port 8080 --reload
+
+aegis assets template --out assets.csv
+aegis assets import --engagement ENG-2026-0001 --file assets.csv
+aegis assets export --engagement ENG-2026-0001 --out exported.csv
 ```
 
 ## 配置
@@ -71,7 +75,7 @@ aegis serve --port 8080 --reload
 | 角色 | 权限 |
 |---|---|
 | `admin` | `*`，含用户管理与全部写操作 |
-| `consultant` | 客户/项目/干系人读写，审计只读 |
+| `consultant` | 客户/项目/干系人/资产/威胁读写，审计只读 |
 | `viewer` | 全部只读 |
 
 权限在服务层统一判定（`aegis/security/rbac.py`），Web 与 REST 共用同一套规则，避免两处实现漂移。
@@ -107,6 +111,15 @@ aegis serve --port 8080 --reload
 | POST | `/api/engagements/{id}/transition` | 状态流转 |
 | GET/POST | `/api/clients/{id}/stakeholders` | 干系人列表 / 新增 |
 | PATCH/DELETE | `/api/stakeholders/{id}` | 干系人更新 / 删除 |
+| GET/POST | `/api/engagements/{id}/assets` | 资产列表（搜索、类别、关键度）/ 登记 |
+| GET/PATCH/DELETE | `/api/assets/{id}` | 资产详情 / 更新 / 删除 |
+| GET | `/api/engagements/{id}/assets/summary` | 资产画像（按类别、类型、关键度统计） |
+| POST | `/api/engagements/{id}/assets/import` | 上传 CSV 导入资产（multipart） |
+| GET | `/api/assets/template.csv` | 下载导入模板 |
+| GET/POST | `/api/engagements/{id}/threats` | 威胁目录 / 登记威胁 |
+| GET/PATCH/DELETE | `/api/threats/{id}` | 威胁详情 / 更新 / 删除 |
+| GET/POST | `/api/assets/{id}/threats` | 资产已关联威胁 / 关联一条威胁 |
+| PATCH/DELETE | `/api/asset-threats/{id}` | 更新 / 解除关联 |
 | GET | `/api/audit` | 审计事件查询（实体、动作、操作人、分页） |
 | GET | `/api/dashboard/summary` | 看板聚合数据 |
 
@@ -123,29 +136,40 @@ draft → scoping → fieldwork → reporting → closed → archived
 
 非法流转返回 `AEG-4001`。终态 `archived` 不可再流转，保证历史项目不被误改。
 
+## 资产与威胁
+
+资产挂在项目下，编号为项目内自增的 `AST-0001`。每项资产记录机密性、完整性、可用性三个 1–4 级赋值：
+
+- 关键度取三者最高档：任一为 4 即 `critical`，最高为 3 为 `high`，最高为 2 为 `medium`，全为 1 为 `low`。
+- 优先级分为 `C×3 + I×2 + A×2`，范围 7–28，用于列表默认排序。
+
+威胁目录同样按项目维护，编号 `THR-0001`。资产与威胁通过配对表关联，每条关联记录具体薄弱点与暴露程度（`low`/`medium`/`high`）。M2 只记录配对，不计算风险值。
+
+CSV 导入接受英文或中文表头，中文取值（如"业务资产""在用"）会自动映射；同名资产跳过而不覆盖，单次上限 1000 行，逐行报告错误。
+
 ## 项目结构
 
 ```
 aegis/
   api/            REST 路由、依赖注入、统一响应
-  db/             引擎、自研迁移器、m0001_initial
+  db/             引擎、自研迁移器、m0001_initial 与 m0002_assets
   models/         SQLAlchemy 模型
   services/       业务规则与权限校验的唯一入口
   security/       口令哈希、令牌、RBAC、输入校验
   web/            Jinja2 服务端渲染路由
-  templates/      14 个页面模板
+  templates/      17 个页面模板
   static/         原生 CSS/JS，无构建链
   config.py       环境配置与启动校验
   errors.py       统一错误码
   cli.py          运维命令
-tests/            77 个用例，覆盖配置、迁移、安全、API、Web、CLI
+tests/            111 个用例，覆盖配置、迁移、安全、API、Web、CLI
 docs/design/      设计取舍记录
 ```
 
 ## 测试
 
 ```bash
-pytest            # 77 passed
+pytest            # 111 passed
 ```
 
 测试使用内存 SQLite 与 `TestClient`，不依赖网络与外部服务，可在 CI 中直接运行。
