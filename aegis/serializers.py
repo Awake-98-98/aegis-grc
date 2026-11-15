@@ -9,7 +9,17 @@ from __future__ import annotations
 
 import json
 
-from aegis.models import AuditEvent, Client, Engagement, Session, Stakeholder, User
+from aegis.models import (
+    Asset,
+    AssetThreat,
+    AuditEvent,
+    Client,
+    Engagement,
+    Session,
+    Stakeholder,
+    Threat,
+    User,
+)
 from aegis.util.time import as_date_iso, as_iso
 
 
@@ -91,6 +101,72 @@ def stakeholder_public(row: Stakeholder) -> dict:
         "notes": row.notes,
         "created_at": as_iso(row.created_at),
         "updated_at": as_iso(row.updated_at),
+    }
+
+
+def asset_public(asset: Asset, *, threat_count: int | None = None) -> dict:
+    payload = {
+        "id": asset.id,
+        "engagement_id": asset.engagement_id,
+        "code": asset.code,
+        "name": asset.name,
+        "asset_type": asset.asset_type,
+        "category": asset.category,
+        "owner": asset.owner,
+        "department": asset.department,
+        "location": asset.location,
+        "description": asset.description,
+        "confidentiality": asset.confidentiality,
+        "integrity": asset.integrity,
+        "availability": asset.availability,
+        "criticality": asset.criticality,
+        "priority_score": asset.priority_score,
+        "lifecycle_status": asset.lifecycle_status,
+        "created_by": asset.created_by,
+        "created_at": as_iso(asset.created_at),
+        "updated_at": as_iso(asset.updated_at),
+    }
+    if threat_count is not None:
+        payload["threat_count"] = threat_count
+    return payload
+
+
+def threat_public(threat: Threat, *, asset_count: int | None = None) -> dict:
+    payload = {
+        "id": threat.id,
+        "engagement_id": threat.engagement_id,
+        "code": threat.code,
+        "name": threat.name,
+        "category": threat.category,
+        "actor": threat.actor,
+        "description": threat.description,
+        "created_by": threat.created_by,
+        "created_at": as_iso(threat.created_at),
+        "updated_at": as_iso(threat.updated_at),
+    }
+    if asset_count is not None:
+        payload["asset_count"] = asset_count
+    return payload
+
+
+def asset_threat_public(
+    link: AssetThreat, *, asset: Asset | None = None, threat: Threat | None = None
+) -> dict:
+    asset = asset or link.asset
+    threat = threat or link.threat
+    return {
+        "id": link.id,
+        "asset_id": link.asset_id,
+        "threat_id": link.threat_id,
+        "asset_code": asset.code if asset else "",
+        "asset_name": asset.name if asset else "",
+        "threat_code": threat.code if threat else "",
+        "threat_name": threat.name if threat else "",
+        "vulnerability": link.vulnerability,
+        "exposure": link.exposure,
+        "notes": link.notes,
+        "created_at": as_iso(link.created_at),
+        "updated_at": as_iso(link.updated_at),
     }
 
 

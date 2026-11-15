@@ -107,3 +107,60 @@ class StakeholderUpdateRequest(BaseModel):
     influence: str | None = None
     interest: str | None = None
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class AssetCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    code: str | None = Field(default=None, max_length=32)
+    asset_type: str = "supporting"
+    category: str = "other"
+    owner: str = Field(default="", max_length=120)
+    department: str = Field(default="", max_length=120)
+    location: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=2000)
+    confidentiality: int = 2
+    integrity: int = 2
+    availability: int = 2
+    lifecycle_status: str = "active"
+
+
+class AssetUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    asset_type: str | None = None
+    category: str | None = None
+    owner: str | None = Field(default=None, max_length=120)
+    department: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    confidentiality: int | None = None
+    integrity: int | None = None
+    availability: int | None = None
+    lifecycle_status: str | None = None
+
+
+class ThreatCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    code: str | None = Field(default=None, max_length=32)
+    category: str = "other"
+    actor: str = "external"
+    description: str = Field(default="", max_length=2000)
+
+
+class ThreatUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    category: str | None = None
+    actor: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class AssetThreatLinkRequest(BaseModel):
+    threat_id: str = Field(min_length=1, max_length=32)
+    vulnerability: str = Field(default="", max_length=4000)
+    exposure: str = "medium"
+    notes: str = Field(default="", max_length=4000)
+
+
+class AssetThreatUpdateRequest(BaseModel):
+    vulnerability: str | None = Field(default=None, max_length=4000)
+    exposure: str | None = None
+    notes: str | None = Field(default=None, max_length=4000)
