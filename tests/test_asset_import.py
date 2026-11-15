@@ -67,6 +67,31 @@ def test_import_skips_existing_names(
     assert client.get(f"/api/engagements/{engagement_id}/assets").json()["meta"]["total"] == 1
 
 
+def test_import_after_delete_reuses_free_codes(
+    client: TestClient, admin_headers: dict, engagement_id: str
+) -> None:
+    """Deleting an asset leaves a gap; a later import must not clash with it."""
+    for index in (1, 2, 3):
+        created = client.post(
+            f"/api/engagements/{engagement_id}/assets",
+            json={"name": f"既有资产{index}"},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+    second = client.get(f"/api/engagements/{engagement_id}/assets").json()["data"][1]
+    assert client.delete(f"/api/assets/{second['id']}", headers=admin_headers).status_code == 200
+
+    payload = (
+        HEADER + "\n新资产A,business,application,,,,2,2,2,active,\n"
+        "新资产B,business,application,,,,2,2,2,active,\n"
+    ).encode("utf-8")
+    response = _upload(client, admin_headers, engagement_id, payload)
+    assert response.status_code == 200, response.text
+    result = response.json()["data"]
+    assert result["imported"] == 2
+    assert result["codes"] == ["AST-0004", "AST-0005"]
+
+
 def test_import_accepts_chinese_headers_and_values(
     client: TestClient, admin_headers: dict, engagement_id: str
 ) -> None:

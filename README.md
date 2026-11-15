@@ -162,14 +162,14 @@ aegis/
   config.py       环境配置与启动校验
   errors.py       统一错误码
   cli.py          运维命令
-tests/            111 个用例，覆盖配置、迁移、安全、API、Web、CLI
+tests/            112 个用例，覆盖配置、迁移、安全、API、Web、CLI
 docs/design/      设计取舍记录
 ```
 
 ## 测试
 
 ```bash
-pytest            # 111 passed
+pytest            # 112 passed
 ```
 
 测试使用内存 SQLite 与 `TestClient`，不依赖网络与外部服务，可在 CI 中直接运行。

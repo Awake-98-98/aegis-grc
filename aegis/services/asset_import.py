@@ -142,6 +142,11 @@ class AssetImportService(ServiceBase):
                 select(Asset.name).where(Asset.engagement_id == engagement.id)
             ).scalars()
         )
+        used_codes = set(
+            self.db.execute(
+                select(Asset.code).where(Asset.engagement_id == engagement.id)
+            ).scalars()
+        )
         next_index = int(
             self.db.execute(
                 select(func.count(Asset.id)).where(Asset.engagement_id == engagement.id)
@@ -172,10 +177,15 @@ class AssetImportService(ServiceBase):
             if name in known_names:
                 skipped.append({"row": offset, "name": name, "reason": "name already exists"})
                 continue
+            # Deletions leave gaps in the sequence; advance past codes that are
+            # still taken instead of failing the whole file on a unique clash.
+            while f"AST-{next_index:04d}" in used_codes:
+                next_index += 1
+            code = f"AST-{next_index:04d}"
             try:
                 asset = Asset(
                     engagement_id=engagement.id,
-                    code=f"AST-{next_index:04d}",
+                    code=code,
                     name=require_text(name, "name", max_length=200),
                     asset_type=choice(
                         _alias("asset_type", values.get("asset_type", "")),
@@ -212,7 +222,8 @@ class AssetImportService(ServiceBase):
 
             self.db.add(asset)
             known_names.add(name)
-            imported.append(asset.code)
+            used_codes.add(code)
+            imported.append(code)
             next_index += 1
             created += 1
 
