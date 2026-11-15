@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from aegis.api.deps import client_meta, get_auth, get_db, require_permission
+from aegis.api.deps import client_meta, get_db, require_permission
 from aegis.api.responses import ok, page_meta
 from aegis.api.schemas import ClientCreateRequest, ClientUpdateRequest
 from aegis.serializers import client_public
