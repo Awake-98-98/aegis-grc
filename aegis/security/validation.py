@@ -20,6 +20,35 @@ ENGAGEMENT_TYPES = (
 ENGAGEMENT_STATUSES = ("draft", "scoping", "fieldwork", "reporting", "closed", "archived")
 LEVELS = ("low", "medium", "high")
 
+ASSET_TYPES = ("business", "supporting")
+ASSET_CATEGORIES = (
+    "application",
+    "database",
+    "server",
+    "network",
+    "endpoint",
+    "data",
+    "people",
+    "facility",
+    "process",
+    "cloud",
+    "third_party",
+    "other",
+)
+ASSET_LIFECYCLE = ("planned", "active", "retired")
+CIA_MIN = 1
+CIA_MAX = 4
+THREAT_CATEGORIES = (
+    "malicious",
+    "insider",
+    "environmental",
+    "technical",
+    "supply_chain",
+    "process",
+    "other",
+)
+THREAT_ACTORS = ("external", "insider", "third_party", "nature", "accidental")
+
 
 def require_text(
     value: str | None,
@@ -95,3 +124,21 @@ def page_params(page: int | None, page_size: int | None) -> tuple[int, int]:
     if size > 200:
         size = 200
     return current, size
+
+
+def cia_grade(value: int | str | None, field: str, *, default: int = 2) -> int:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        grade = int(value)
+    except (TypeError, ValueError):
+        raise ValidationFailure(
+            f"{field} must be an integer between {CIA_MIN} and {CIA_MAX}",
+            details={"field": field, "min": CIA_MIN, "max": CIA_MAX},
+        ) from None
+    if grade < CIA_MIN or grade > CIA_MAX:
+        raise ValidationFailure(
+            f"{field} must be between {CIA_MIN} and {CIA_MAX}",
+            details={"field": field, "min": CIA_MIN, "max": CIA_MAX},
+        )
+    return grade
