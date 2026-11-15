@@ -66,3 +66,87 @@ def test_create_user_requires_admin(tmp_path: Path, capsys) -> None:
         )
         == 2
     )
+
+
+def test_assets_import_and_export(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    capsys.readouterr()
+
+    csv_path = tmp_path / "extra.csv"
+    csv_path.write_text(
+        "name,category,confidentiality,integrity,availability\n"
+        "CLI 导入资产,server,3,3,3\n",
+        encoding="utf-8",
+    )
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "assets",
+                "import",
+                "--engagement",
+                "ENG-2026-0001",
+                "--file",
+                str(csv_path),
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "imported 1" in output
+
+    export_path = tmp_path / "assets.csv"
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "assets",
+                "export",
+                "--engagement",
+                "ENG-2026-0001",
+                "--out",
+                str(export_path),
+            ]
+        )
+        == 0
+    )
+    exported = export_path.read_text(encoding="utf-8")
+    assert "CLI 导入资产" in exported
+    assert "AST-0006" in exported
+
+
+def test_assets_import_unknown_engagement(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    csv_path = tmp_path / "extra.csv"
+    csv_path.write_text("name\n资产\n", encoding="utf-8")
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "assets",
+                "import",
+                "--engagement",
+                "ENG-9999-9999",
+                "--file",
+                str(csv_path),
+            ]
+        )
+        == 2
+    )
+    assert "engagement not found" in capsys.readouterr().err
+
+
+def test_assets_template(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    out_path = tmp_path / "template.csv"
+    assert main(["--home", home, "assets", "template", "--out", str(out_path)]) == 0
+    assert out_path.read_text(encoding="utf-8").lstrip("\ufeff").startswith(
+        "name,asset_type,category"
+    )

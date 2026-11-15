@@ -93,3 +93,64 @@ def test_second_admin_allows_demotion(client: TestClient, bootstrap_admin: dict)
     )
     assert response.status_code == 200
     assert response.json()["data"]["role"] == "consultant"
+
+
+def test_viewer_can_read_assets_but_not_write_them(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "权限项目"},
+        headers=admin,
+    ).json()["data"]
+    client.post(
+        f"/api/engagements/{engagement['id']}/assets",
+        json={"name": "权限资产"},
+        headers=admin,
+    )
+
+    _add_member(client, bootstrap_admin["csrf_token"], "viewer2@aegis.test", "viewer")
+    token = _token_for(client, "viewer2@aegis.test")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    listing = client.get(f"/api/engagements/{engagement['id']}/assets", headers=headers)
+    assert listing.status_code == 200
+    assert listing.json()["meta"]["total"] == 1
+
+    denied = client.post(
+        f"/api/engagements/{engagement['id']}/assets",
+        headers=headers,
+        json={"name": "越权资产"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "AEG-3002"
+
+
+def test_consultant_can_import_assets(client: TestClient, bootstrap_admin: dict) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "导入权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "导入权限项目"},
+        headers=admin,
+    ).json()["data"]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "consultant2@aegis.test", "consultant")
+    token = _token_for(client, "consultant2@aegis.test")
+    response = client.post(
+        f"/api/engagements/{engagement['id']}/assets/import",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "file": (
+                "a.csv",
+                b"name,category\nconsultant-imported,server\n",
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["imported"] == 1
