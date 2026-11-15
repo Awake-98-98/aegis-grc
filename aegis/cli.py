@@ -18,12 +18,23 @@ from aegis import __app_name__, __version__
 from aegis.config import ConfigError, Settings
 from aegis.db import create_db_engine, create_session_factory, run_migrations, schema_status
 from aegis.errors import AppError, NotFound
-from aegis.models import Client, Engagement, Session as LoginSession, Stakeholder, User
-from aegis.security.passwords import hash_password
+from aegis.models import (
+    Asset,
+    AssetThreat,
+    Client,
+    Engagement,
+    Session as LoginSession,
+    Stakeholder,
+    Threat,
+    User,
+)
+from aegis.services.asset_import import AssetImportService, csv_template
+from aegis.services.assets import AssetService
 from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
 from aegis.services.engagements import EngagementService
 from aegis.services.stakeholders import StakeholderService
+from aegis.services.threats import ThreatService
 from aegis.util.time import utcnow
 
 
@@ -53,6 +64,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show schema, counts and database location")
     sub.add_parser("seed-demo", help="load fictional demo clients and engagements")
     sub.add_parser("prune-sessions", help="delete expired and revoked sessions")
+
+    assets = sub.add_parser("assets", help="asset inventory utilities")
+    assets_sub = assets.add_subparsers(dest="assets_command", required=True)
+    assets_import = assets_sub.add_parser("import", help="import assets from a CSV file")
+    assets_import.add_argument("--engagement", required=True, help="engagement code, e.g. ENG-2026-0001")
+    assets_import.add_argument("--file", required=True, type=Path, help="path to the CSV file")
+    assets_template = assets_sub.add_parser("template", help="write the CSV template")
+    assets_template.add_argument("--out", type=Path, default=None, help="defaults to stdout")
+    assets_export = assets_sub.add_parser("export", help="export the asset list as CSV")
+    assets_export.add_argument("--engagement", required=True)
+    assets_export.add_argument("--out", type=Path, default=None)
     return parser
 
 
@@ -179,6 +201,15 @@ def cmd_status(settings: Settings) -> int:
             "stakeholders": int(
                 db.execute(select(func.count(Stakeholder.id)).select_from(Stakeholder)).scalar() or 0
             ),
+            "assets": int(
+                db.execute(select(func.count(Asset.id)).select_from(Asset)).scalar() or 0
+            ),
+            "threats": int(
+                db.execute(select(func.count(Threat.id)).select_from(Threat)).scalar() or 0
+            ),
+            "threat_links": int(
+                db.execute(select(func.count(AssetThreat.id)).select_from(AssetThreat)).scalar() or 0
+            ),
         }
         status = schema_status(engine)
     engine.dispose()
@@ -187,7 +218,7 @@ def cmd_status(settings: Settings) -> int:
     print(f"database:  {settings.database_url}")
     print(f"schema:    {status['current']}/{status['latest']}")
     for key, value in counts.items():
-        print(f"{key + ':':<12}{value}")
+        print(f"{key + ':':<14}{value}")
     return 0
 
 
@@ -309,9 +340,146 @@ def cmd_seed_demo(args, settings: Settings) -> int:
                 interest=interest,
             )
 
+        assets = AssetService(db)
+        threats = ThreatService(db)
+        mes = assets.create(
+            ctx,
+            e1.id,
+            name="生产执行系统 MES",
+            asset_type="business",
+            category="application",
+            owner="王海",
+            department="信息中心",
+            location="总部园区 A 机房",
+            confidentiality=3,
+            integrity=3,
+            availability=4,
+            description="承载排产、工单与质量追溯，停机直接影响两条产线。",
+        )
+        erp = assets.create(
+            ctx,
+            e1.id,
+            name="ERP 财务数据库",
+            asset_type="business",
+            category="database",
+            owner="赵蕾",
+            department="财务部",
+            location="总部园区 A 机房",
+            confidentiality=4,
+            integrity=3,
+            availability=3,
+        )
+        core_switch = assets.create(
+            ctx,
+            e1.id,
+            name="园区核心交换机",
+            asset_type="supporting",
+            category="network",
+            owner="孙鹏",
+            department="信息中心",
+            location="总部园区 A 机房",
+            confidentiality=2,
+            integrity=2,
+            availability=4,
+        )
+        bastion = assets.create(
+            ctx,
+            e1.id,
+            name="运维堡垒机",
+            asset_type="supporting",
+            category="server",
+            owner="孙鹏",
+            department="信息中心",
+            location="总部园区 A 机房",
+            confidentiality=3,
+            integrity=4,
+            availability=3,
+            description="全部生产服务器运维入口，凭据集中托管。",
+        )
+        assets.create(
+            ctx,
+            e1.id,
+            name="办公终端（120 台）",
+            asset_type="supporting",
+            category="endpoint",
+            owner="行政部",
+            department="行政部",
+            location="总部与生产基地",
+            confidentiality=2,
+            integrity=1,
+            availability=1,
+        )
+
+        ransomware = threats.create(
+            ctx,
+            e1.id,
+            name="勒索软件加密生产数据",
+            category="malicious",
+            actor="external",
+            description="通过钓鱼邮件或暴露面入侵后横向移动，加密数据库与文件服务器。",
+        )
+        phishing = threats.create(
+            ctx,
+            e1.id,
+            name="钓鱼邮件窃取运维凭据",
+            category="malicious",
+            actor="external",
+        )
+        mistake = threats.create(
+            ctx,
+            e1.id,
+            name="外包人员误操作导致配置丢失",
+            category="insider",
+            actor="third_party",
+        )
+        power = threats.create(
+            ctx,
+            e1.id,
+            name="机房供电中断",
+            category="environmental",
+            actor="nature",
+        )
+
+        assets.link_threat(
+            ctx,
+            mes.id,
+            threat_id=ransomware.id,
+            vulnerability="生产网与办公网未做 VLAN 隔离，终端可直接访问 MES 端口。",
+            exposure="high",
+        )
+        assets.link_threat(
+            ctx,
+            bastion.id,
+            threat_id=phishing.id,
+            vulnerability="堡垒机未启用多因素认证，仅靠静态口令。",
+            exposure="high",
+        )
+        assets.link_threat(
+            ctx,
+            erp.id,
+            threat_id=ransomware.id,
+            vulnerability="数据库备份每日全量落本地 NAS，未做离线副本。",
+            exposure="medium",
+        )
+        assets.link_threat(
+            ctx,
+            core_switch.id,
+            threat_id=power.id,
+            vulnerability="机房 UPS 电池组已超服役年限，未做带载放电测试。",
+            exposure="medium",
+        )
+        assets.link_threat(
+            ctx,
+            mes.id,
+            threat_id=mistake.id,
+            vulnerability="变更窗口外允许直接操作生产配置，无审批留痕。",
+            exposure="medium",
+        )
+
         print("demo data loaded:")
         print(f"  clients:     {north.code}, {bank.code}, {clinic.code}")
         print(f"  engagements: {e1.code}, {e2.code}, {e3.code}")
+        print(f"  assets:      {e1.code} 下有 5 项资产、4 类威胁、5 条关联")
         if created_admin:
             print(f"  demo admin:  {demo_email} / {demo_password}")
     engine.dispose()
@@ -327,6 +495,100 @@ def cmd_prune_sessions(args, settings: Settings) -> int:
     return 0
 
 
+def cmd_assets(args, settings: Settings) -> int:
+    if args.assets_command == "template":
+        text = csv_template()
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+            print(f"template written to {args.out}")
+        else:
+            sys.stdout.write(text)
+        return 0
+
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+
+            if args.assets_command == "import":
+                if not args.file.exists():
+                    print(f"error: file not found: {args.file}", file=sys.stderr)
+                    return 2
+                result = AssetImportService(db).import_bytes(
+                    ctx,
+                    engagement.id,
+                    args.file.read_bytes(),
+                    filename=args.file.name,
+                )
+                print(
+                    f"imported {result['imported']}, skipped {result['skipped']}, "
+                    f"failed {result['failed']}"
+                )
+                for error in result["errors"]:
+                    print(f"  row {error['row']}: {error['message']}")
+                return 0 if result["failed"] == 0 else 1
+
+            rows, total, _, _ = AssetService(db).list(ctx, engagement.id, page_size=200)
+            lines = [
+                "code,name,asset_type,category,owner,department,location,"
+                "confidentiality,integrity,availability,criticality,lifecycle_status"
+            ]
+            for row in rows:
+                lines.append(
+                    ",".join(
+                        _csv_cell(value)
+                        for value in (
+                            row.code,
+                            row.name,
+                            row.asset_type,
+                            row.category,
+                            row.owner,
+                            row.department,
+                            row.location,
+                            row.confidentiality,
+                            row.integrity,
+                            row.availability,
+                            row.criticality,
+                            row.lifecycle_status,
+                        )
+                    )
+                )
+            text = "\ufeff" + "\n".join(lines) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+                print(f"exported {total} assets to {args.out}")
+            else:
+                sys.stdout.write(text)
+            return 0
+    finally:
+        engine.dispose()
+
+
+def _operating_user(db) -> User:
+    """CLI actions need an actor; use the oldest active administrator."""
+    admin = db.execute(
+        select(User)
+        .where(User.role == "admin", User.is_active.is_(True))
+        .order_by(User.created_at.asc())
+    ).scalars().first()
+    if admin is None:
+        raise NotFound("no active administrator; run create-admin first")
+    return admin
+
+
+def _csv_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    if any(char in text for char in ',"\n'):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
 COMMANDS = {
     "init": cmd_init,
     "create-admin": cmd_create_admin,
@@ -335,6 +597,7 @@ COMMANDS = {
     "status": cmd_status,
     "seed-demo": cmd_seed_demo,
     "prune-sessions": cmd_prune_sessions,
+    "assets": cmd_assets,
 }
 
 
