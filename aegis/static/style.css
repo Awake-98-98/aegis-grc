@@ -186,6 +186,16 @@ input[readonly], select[disabled] { background: #f2f4f7; color: var(--muted); }
 .badge-dormant, .badge-scoping, .badge-reporting { background: #fffaeb; color: #b54708; }
 .badge-archived, .badge-closed { background: #f2f4f7; color: #667085; }
 .badge-draft { background: #f4f3ff; color: #5925dc; }
+.badge-critical { background: #fef3f2; color: #b42318; }
+.badge-high { background: #fffaeb; color: #b54708; }
+.badge-medium { background: #eff8ff; color: #175cd3; }
+.badge-low { background: #f2f4f7; color: #475467; }
+
+.cia-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; padding: 12px 14px; background: #f9fafb; border-radius: 8px;
+}
+.cia-grid .span-3 { grid-column: span 3; }
 
 .facts { display: grid; grid-template-columns: 120px 1fr; gap: 7px 14px; margin: 0; }
 .facts dt { color: var(--muted); font-size: 12px; }

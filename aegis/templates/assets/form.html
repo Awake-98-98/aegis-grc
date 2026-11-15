@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑资产' if mode == 'edit' else '登记资产' }}{% endblock %}
+{% block eyebrow %}咨询项目 · {{ engagement.code }}{% endblock %}
+{% block heading %}{{ '编辑资产' if mode == 'edit' else '登记资产' }}{% endblock %}
+{% block content %}
+<section class="card">
+  <form method="post" action="{{ form_action }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>资产名称
+      <input type="text" name="name" maxlength="200" required value="{{ asset.name if asset else '' }}">
+    </label>
+    <label>资产类型
+      <select name="asset_type">
+        {% for item in types %}
+        <option value="{{ item }}" {{ 'selected' if asset and asset.asset_type == item else '' }}>{{ asset_type_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>资产类别
+      <select name="category">
+        {% for item in categories %}
+        <option value="{{ item }}" {{ 'selected' if asset and asset.category == item else '' }}>{{ asset_category_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>责任人
+      <input type="text" name="owner" maxlength="120" value="{{ asset.owner if asset else '' }}">
+    </label>
+    <label>所属部门
+      <input type="text" name="department" maxlength="120" value="{{ asset.department if asset else '' }}">
+    </label>
+    <label>部署位置
+      <input type="text" name="location" maxlength="200" value="{{ asset.location if asset else '' }}">
+    </label>
+    <label>生命周期
+      <select name="lifecycle_status">
+        {% for item in lifecycle %}
+        <option value="{{ item }}" {{ 'selected' if asset and asset.lifecycle_status == item else '' }}>{{ asset_lifecycle_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="span-2 cia-grid">
+      <label>机密性 C
+        <select name="confidentiality">
+          {% for grade in [1, 2, 3, 4] %}
+          <option value="{{ grade }}" {{ 'selected' if asset and asset.confidentiality == grade else ('selected' if not asset and grade == 2 else '') }}>{{ grade }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>完整性 I
+        <select name="integrity">
+          {% for grade in [1, 2, 3, 4] %}
+          <option value="{{ grade }}" {{ 'selected' if asset and asset.integrity == grade else ('selected' if not asset and grade == 2 else '') }}>{{ grade }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>可用性 A
+        <select name="availability">
+          {% for grade in [1, 2, 3, 4] %}
+          <option value="{{ grade }}" {{ 'selected' if asset and asset.availability == grade else ('selected' if not asset and grade == 2 else '') }}>{{ grade }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint span-3">1 为可忽略，4 为致命。关键度取 C/I/A 的最高档：任一为 4 即关键，最高为 3 为高，最高为 2 为中，全为 1 为低。</p>
+    </div>
+    <label class="span-2">说明
+      <textarea name="description" rows="4" maxlength="2000">{{ asset.description if asset else '' }}</textarea>
+    </label>
+    <div class="form-actions span-2">
+      <button class="button primary" type="submit">保存</button>
+      <a class="button" href="{{ '/assets/' + asset.id if asset else '/engagements/' + engagement.id + '/assets' }}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ engagement.name }} · 资产清单{% endblock %}
+{% block eyebrow %}咨询项目 · {{ engagement.code }}{% endblock %}
+{% block heading %}资产清单{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/engagements/{{ engagement.id }}">← 返回项目</a>
+  <span class="spacer"></span>
+  {% if can(current_user.role, 'asset:write') %}
+  <a class="button primary" href="/engagements/{{ engagement.id }}/assets/new">登记资产</a>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">资产总数</span>
+    <strong class="stat-value">{{ summary.total }}</strong>
+    <small>{{ summary.unlinked }} 项尚未关联威胁</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">关键资产</span>
+    <strong class="stat-value">{{ summary.by_criticality.get('critical', 0) }}</strong>
+    <small>高 {{ summary.by_criticality.get('high', 0) }} · 中 {{ summary.by_criticality.get('medium', 0) }} · 低 {{ summary.by_criticality.get('low', 0) }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">威胁关联</span>
+    <strong class="stat-value">{{ summary.threat_links }}</strong>
+    <small>资产与威胁的具体配对数量</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">业务资产</span>
+    <strong class="stat-value">{{ summary.by_type.get('business', 0) }}</strong>
+    <small>支撑资产 {{ summary.by_type.get('supporting', 0) }}</small>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h2>筛选</h2>
+    <form method="get" action="/engagements/{{ engagement.id }}/assets" class="inline-form">
+      <input type="search" name="q" value="{{ q }}" placeholder="名称 / 编号 / 责任人">
+      <select name="category">
+        <option value="">全部类别</option>
+        {% for item in categories %}
+        <option value="{{ item }}" {{ 'selected' if category == item else '' }}>{{ asset_category_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+      <select name="asset_type">
+        <option value="">全部类型</option>
+        {% for item in types %}
+        <option value="{{ item }}" {{ 'selected' if asset_type == item else '' }}>{{ asset_type_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+      <select name="criticality">
+        <option value="">全部关键度</option>
+        {% for item in criticalities %}
+        <option value="{{ item }}" {{ 'selected' if criticality == item else '' }}>{{ criticality_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+      <button class="button" type="submit">筛选</button>
+    </form>
+  </div>
+
+  {% if assets %}
+  <table class="table">
+    <thead>
+      <tr><th>编号</th><th>资产</th><th>类型 / 类别</th><th>责任人</th><th>C / I / A</th><th>关键度</th><th>威胁</th><th>更新</th></tr>
+    </thead>
+    <tbody>
+    {% for item in assets %}
+      <tr>
+        <td class="mono">{{ item.code }}</td>
+        <td>
+          <a href="/assets/{{ item.id }}">{{ item.name }}</a>
+          {% if item.location %}<div class="small muted">{{ item.location }}</div>{% endif %}
+        </td>
+        <td class="small">{{ asset_type_labels.get(item.asset_type, item.asset_type) }} · {{ asset_category_labels.get(item.category, item.category) }}</td>
+        <td class="small">{{ item.owner or '-' }}</td>
+        <td class="mono">{{ item.confidentiality }} / {{ item.integrity }} / {{ item.availability }}</td>
+        <td><span class="badge badge-{{ item.criticality }}">{{ criticality_labels.get(item.criticality, item.criticality) }}</span></td>
+        <td class="mono">{{ threat_counts.get(item.id, 0) }}</td>
+        <td class="muted small">{{ item.updated_at | short_time }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="pager">
+    <span class="muted small">共 {{ total }} 项</span>
+    {% if page > 1 %}<a class="button" href="/engagements/{{ engagement.id }}/assets?q={{ q }}&category={{ category }}&asset_type={{ asset_type }}&criticality={{ criticality }}&page={{ page - 1 }}">上一页</a>{% endif %}
+    <span class="mono small">{{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a class="button" href="/engagements/{{ engagement.id }}/assets?q={{ q }}&category={{ category }}&asset_type={{ asset_type }}&criticality={{ criticality }}&page={{ page + 1 }}">下一页</a>{% endif %}
+  </div>
+  {% else %}
+  <p class="empty">该项目还没有资产。{% if can(current_user.role, 'asset:write') %}<a href="/engagements/{{ engagement.id }}/assets/new">登记第一项资产</a>{% endif %}</p>
+  {% endif %}
+</section>
+
+{% if can(current_user.role, 'asset:write') %}
+<section class="card">
+  <div class="card-head">
+    <h2>批量导入</h2>
+    <a class="quiet" href="/api/assets/template.csv">下载模板</a>
+  </div>
+  <form method="post" action="/engagements/{{ engagement.id }}/assets/import" enctype="multipart/form-data" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="file" name="file" accept=".csv,text/csv" required>
+    <button class="button" type="submit">导入 CSV</button>
+  </form>
+  <p class="hint">同名资产会被跳过，不会覆盖已有记录。支持 UTF-8 与 GB18030 编码，单次上限 1000 行。</p>
+</section>
+{% endif %}
+{% endblock %}

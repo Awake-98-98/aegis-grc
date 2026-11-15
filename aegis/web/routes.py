@@ -17,21 +17,27 @@ from sqlalchemy.orm import Session
 
 from aegis.api.responses import clear_session_cookie, set_session_cookie
 from aegis.config import Settings
-from aegis.errors import CsrfFailure, Unauthorized
-from aegis.models import User
+from aegis.errors import CsrfFailure, Unauthorized, ValidationFailure
+from aegis.models import AssetThreat, User
 from aegis.security.tokens import csrf_matches
 from aegis.security.validation import (
+    ASSET_CATEGORIES,
+    ASSET_LIFECYCLE,
+    ASSET_TYPES,
     CLIENT_STATUSES,
     ENGAGEMENT_STATUSES,
     ENGAGEMENT_TYPES,
     LEVELS,
 )
 from aegis.serializers import audit_public
+from aegis.services.asset_import import AssetImportService
+from aegis.services.assets import CRITICALITY_LABELS, AssetService
 from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
 from aegis.services.dashboard import DashboardService
 from aegis.services.engagements import ALLOWED_TRANSITIONS, EngagementService
 from aegis.services.stakeholders import StakeholderService
+from aegis.services.threats import ThreatService
 
 router = APIRouter(tags=["web"])
 
@@ -458,6 +464,7 @@ def engagement_detail_page(
         stakeholders=stakeholders,
         lead=lead,
         timeline=timeline,
+        asset_summary=AssetService(db).summary(ctx, engagement_id),
         next_statuses=sorted(ALLOWED_TRANSITIONS.get(engagement.status, set())),
         statuses=ENGAGEMENT_STATUSES,
         levels=LEVELS,
@@ -583,6 +590,278 @@ async def stakeholder_delete_submit(
         ctx, stakeholder_id, ip=ip, user_agent=user_agent
     )
     return _redirect(f"/engagements/{engagement_id}")
+
+
+# ------------------------------------------------------------------- assets
+@router.get("/engagements/{engagement_id}/assets", response_class=HTMLResponse)
+def assets_page(
+    engagement_id: str,
+    request: Request,
+    q: str = "",
+    category: str = "",
+    asset_type: str = "",
+    criticality: str = "",
+    page: int = 1,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    engagement = EngagementService(db).get_for(ctx, engagement_id)
+    service = AssetService(db)
+    rows, total, page, page_size = service.list(
+        ctx,
+        engagement_id,
+        q=q,
+        category=category,
+        asset_type=asset_type,
+        criticality=criticality,
+        page=page,
+        page_size=40,
+    )
+    counts = service.threat_counts([row.id for row in rows])
+    pages = (total + page_size - 1) // page_size if total else 1
+    return _render(
+        request,
+        "assets/list.html",
+        ctx,
+        nav="engagements",
+        engagement=engagement,
+        assets=rows,
+        threat_counts=counts,
+        summary=service.summary(ctx, engagement_id),
+        total=total,
+        page=page,
+        pages=pages,
+        q=q,
+        category=category,
+        asset_type=asset_type,
+        criticality=criticality,
+        categories=ASSET_CATEGORIES,
+        types=ASSET_TYPES,
+        criticalities=list(CRITICALITY_LABELS),
+    )
+
+
+@router.get("/engagements/{engagement_id}/assets/new", response_class=HTMLResponse)
+def asset_new_page(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    engagement = EngagementService(db).get_for(ctx, engagement_id)
+    return _render(
+        request,
+        "assets/form.html",
+        ctx,
+        nav="engagements",
+        mode="create",
+        engagement=engagement,
+        asset=None,
+        form_action=f"/engagements/{engagement.id}/assets",
+        categories=ASSET_CATEGORIES,
+        types=ASSET_TYPES,
+        lifecycle=ASSET_LIFECYCLE,
+    )
+
+
+@router.post("/engagements/{engagement_id}/assets", response_class=HTMLResponse)
+async def asset_create_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    asset = AssetService(db).create(
+        ctx,
+        engagement_id,
+        name=form.get("name", ""),
+        asset_type=form.get("asset_type", "supporting"),
+        category=form.get("category", "other"),
+        owner=form.get("owner", ""),
+        department=form.get("department", ""),
+        location=form.get("location", ""),
+        description=form.get("description", ""),
+        confidentiality=form.get("confidentiality", "2"),
+        integrity=form.get("integrity", "2"),
+        availability=form.get("availability", "2"),
+        lifecycle_status=form.get("lifecycle_status", "active"),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assets/{asset.id}")
+
+
+@router.post("/engagements/{engagement_id}/assets/import", response_class=HTMLResponse)
+async def asset_import_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await request.form()
+    _check_csrf(ctx, {"csrf_token": str(form.get("csrf_token", ""))})
+    upload = form.get("file")
+    payload = await upload.read() if hasattr(upload, "read") else b""
+    if not payload:
+        raise ValidationFailure("please choose a CSV file")
+    ip, user_agent = _ip(request)
+    AssetImportService(db).import_bytes(
+        ctx,
+        engagement_id,
+        payload,
+        filename=getattr(upload, "filename", "") or "",
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/engagements/{engagement_id}/assets")
+
+
+@router.get("/assets/{asset_id}", response_class=HTMLResponse)
+def asset_detail_page(
+    asset_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = AssetService(db)
+    asset = service.get_for(ctx, asset_id)
+    engagement = EngagementService(db).get_for(ctx, asset.engagement_id)
+    links = service.links_for(asset.id)
+    linked_ids = {link.threat_id for link in links}
+    threats, _, _, _ = ThreatService(db).list(ctx, asset.engagement_id, page_size=200)
+    return _render(
+        request,
+        "assets/detail.html",
+        ctx,
+        nav="engagements",
+        asset=asset,
+        engagement=engagement,
+        links=links,
+        available_threats=[row for row in threats if row.id not in linked_ids],
+        levels=LEVELS,
+    )
+
+
+@router.get("/assets/{asset_id}/edit", response_class=HTMLResponse)
+def asset_edit_page(
+    asset_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    asset = AssetService(db).get_for(ctx, asset_id)
+    engagement = EngagementService(db).get_for(ctx, asset.engagement_id)
+    return _render(
+        request,
+        "assets/form.html",
+        ctx,
+        nav="engagements",
+        mode="edit",
+        engagement=engagement,
+        asset=asset,
+        form_action=f"/assets/{asset.id}/edit",
+        categories=ASSET_CATEGORIES,
+        types=ASSET_TYPES,
+        lifecycle=ASSET_LIFECYCLE,
+    )
+
+
+@router.post("/assets/{asset_id}/edit", response_class=HTMLResponse)
+async def asset_edit_submit(
+    asset_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    AssetService(db).update(
+        ctx,
+        asset_id,
+        name=form.get("name"),
+        asset_type=form.get("asset_type"),
+        category=form.get("category"),
+        owner=form.get("owner"),
+        department=form.get("department"),
+        location=form.get("location"),
+        description=form.get("description"),
+        confidentiality=form.get("confidentiality"),
+        integrity=form.get("integrity"),
+        availability=form.get("availability"),
+        lifecycle_status=form.get("lifecycle_status"),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assets/{asset_id}")
+
+
+@router.post("/assets/{asset_id}/delete", response_class=HTMLResponse)
+async def asset_delete_submit(
+    asset_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    asset = AssetService(db).get_for(ctx, asset_id)
+    engagement_id = asset.engagement_id
+    AssetService(db).delete(ctx, asset_id, ip=ip, user_agent=user_agent)
+    return _redirect(f"/engagements/{engagement_id}/assets")
+
+
+@router.post("/assets/{asset_id}/threats", response_class=HTMLResponse)
+async def asset_link_threat_submit(
+    asset_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    AssetService(db).link_threat(
+        ctx,
+        asset_id,
+        threat_id=form.get("threat_id", ""),
+        vulnerability=form.get("vulnerability", ""),
+        exposure=form.get("exposure", "medium"),
+        notes=form.get("notes", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assets/{asset_id}")
+
+
+@router.post("/asset-threats/{link_id}/delete", response_class=HTMLResponse)
+async def asset_unlink_threat_submit(
+    link_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    link = db.get(AssetThreat, link_id)
+    asset_id = link.asset_id if link else ""
+    AssetService(db).unlink_threat(ctx, link_id, ip=ip, user_agent=user_agent)
+    return _redirect(f"/assets/{asset_id}")
 
 
 # ---------------------------------------------------------------------------- audit

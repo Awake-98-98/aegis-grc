@@ -12,7 +12,14 @@ from fastapi.templating import Jinja2Templates
 
 from aegis.config import Settings
 from aegis.security.rbac import can
+from aegis.services.assets import (
+    ASSET_CATEGORY_LABELS,
+    ASSET_LIFECYCLE_LABELS,
+    ASSET_TYPE_LABELS,
+    CRITICALITY_LABELS,
+)
 from aegis.services.engagements import STATUS_LABELS, TYPE_LABELS
+from aegis.services.threats import THREAT_ACTOR_LABELS, THREAT_CATEGORY_LABELS
 from aegis.util.time import as_date_iso, as_iso
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -48,6 +55,12 @@ def build_templates(settings: Settings) -> Jinja2Templates:
         type_labels=TYPE_LABELS,
         client_status_labels=CLIENT_STATUS_LABELS,
         level_labels=LEVEL_LABELS,
+        asset_type_labels=ASSET_TYPE_LABELS,
+        asset_category_labels=ASSET_CATEGORY_LABELS,
+        asset_lifecycle_labels=ASSET_LIFECYCLE_LABELS,
+        criticality_labels=CRITICALITY_LABELS,
+        threat_category_labels=THREAT_CATEGORY_LABELS,
+        threat_actor_labels=THREAT_ACTOR_LABELS,
         humanize_action=_humanize_action,
         settings=settings,
     )

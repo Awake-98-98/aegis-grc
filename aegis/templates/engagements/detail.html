@@ -10,6 +10,9 @@
   {% if can(current_user.role, 'engagement:write') %}
   <a class="button" href="/engagements/{{ engagement.id }}/edit">编辑项目</a>
   {% endif %}
+  {% if can(current_user.role, 'asset:read') %}
+  <a class="button" href="/engagements/{{ engagement.id }}/assets">资产清单{% if asset_summary %} · {{ asset_summary.total }}{% endif %}</a>
+  {% endif %}
   <a class="button" href="/clients/{{ engagement.client_id }}">查看客户</a>
 </div>
 

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }}{% endblock %}
+{% block eyebrow %}资产 · {{ engagement.code }}{% endblock %}
+{% block heading %}{{ asset.name }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/engagements/{{ engagement.id }}/assets">← 资产清单</a>
+  <span class="spacer"></span>
+  {% if can(current_user.role, 'asset:write') %}
+  <a class="button" href="/assets/{{ asset.id }}/edit">编辑</a>
+  <form method="post" action="/assets/{{ asset.id }}/delete" data-confirm="确认删除该资产？关联的威胁配对也会一并删除。">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="link-button danger" type="submit">删除</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head">
+      <h2>资产档案</h2>
+      <span class="badge badge-{{ asset.criticality }}">{{ criticality_labels.get(asset.criticality, asset.criticality) }}</span>
+    </div>
+    <dl class="facts">
+      <dt>编号</dt><dd class="mono">{{ asset.code }}</dd>
+      <dt>类型</dt><dd>{{ asset_type_labels.get(asset.asset_type, asset.asset_type) }} · {{ asset_category_labels.get(asset.category, asset.category) }}</dd>
+      <dt>责任人</dt><dd>{{ asset.owner or '-' }}{% if asset.department %}（{{ asset.department }}）{% endif %}</dd>
+      <dt>位置</dt><dd>{{ asset.location or '-' }}</dd>
+      <dt>生命周期</dt><dd>{{ asset_lifecycle_labels.get(asset.lifecycle_status, asset.lifecycle_status) }}</dd>
+      <dt>C / I / A</dt><dd class="mono">{{ asset.confidentiality }} / {{ asset.integrity }} / {{ asset.availability }}</dd>
+      <dt>优先级分</dt><dd class="mono">{{ asset.priority_score }} / 28</dd>
+      <dt>创建</dt><dd class="small muted">{{ asset.created_at | short_time }}</dd>
+      <dt>更新</dt><dd class="small muted">{{ asset.updated_at | short_time }}</dd>
+    </dl>
+    {% if asset.description %}
+    <p class="notes">{{ asset.description }}</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>威胁面</h2><span class="quiet">{{ links | length }} 项</span></div>
+    {% if links %}
+    <table class="table compact">
+      <thead><tr><th>威胁</th><th>暴露</th><th></th></tr></thead>
+      <tbody>
+      {% for link in links %}
+        <tr>
+          <td>
+            <span class="mono small">{{ link.threat.code }}</span> {{ link.threat.name }}
+            {% if link.vulnerability %}<div class="small muted">{{ link.vulnerability }}</div>{% endif %}
+          </td>
+          <td><span class="badge badge-{{ link.exposure }}">{{ level_labels.get(link.exposure, link.exposure) }}</span></td>
+          <td class="right">
+            {% if can(current_user.role, 'asset:write') %}
+            <form method="post" action="/asset-threats/{{ link.id }}/delete" data-confirm="解除该威胁关联？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="link-button danger" type="submit">解除</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">尚未关联任何威胁。</p>
+    {% endif %}
+
+    {% if can(current_user.role, 'asset:write') %}
+    {% if available_threats %}
+    <form method="post" action="/assets/{{ asset.id }}/threats" class="grid-form compact-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>威胁
+        <select name="threat_id" required>
+          {% for item in available_threats %}
+          <option value="{{ item.id }}">{{ item.code }} · {{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>暴露程度
+        <select name="exposure">
+          {% for item in levels %}
+          <option value="{{ item }}" {{ 'selected' if item == 'medium' else '' }}>{{ level_labels.get(item, item) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="span-2">薄弱点
+        <textarea name="vulnerability" rows="2" maxlength="4000" placeholder="例如：未启用多因素认证"></textarea>
+      </label>
+      <div class="form-actions span-2">
+        <button class="button" type="submit">关联威胁</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="hint">该项目的威胁目录为空，或所有威胁都已关联。</p>
+    {% endif %}
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
