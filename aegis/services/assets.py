@@ -348,6 +348,19 @@ class AssetService(ServiceBase):
             ).scalars()
         )
 
+    def links_for_engagement(
+        self, ctx: AuthContext, engagement_id: str
+    ) -> list[AssetThreat]:
+        self.require(ctx, "asset:read")
+        return list(
+            self.db.execute(
+                select(AssetThreat)
+                .join(Asset, AssetThreat.asset_id == Asset.id)
+                .where(Asset.engagement_id == engagement_id)
+                .order_by(Asset.code.asc(), AssetThreat.created_at.asc())
+            ).scalars()
+        )
+
     def link_threat(
         self,
         ctx: AuthContext,
