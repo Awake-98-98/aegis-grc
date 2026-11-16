@@ -10,12 +10,12 @@ AegisGRC 面向独立安全顾问与小团队咨询方：不需要云服务、�
 |---|---|---|
 | M1 | 平台基座：数据库迁移、认证与 RBAC、审计、客户/项目/干系人、Web 控制台、CLI | 已完成 |
 | M2 | 资产与威胁面：资产清单、CIA 分级、威胁目录、资产威胁配对、CSV 导入导出 | 已完成 |
-| M3 | 风险评估：可能性与影响矩阵、固有/剩余风险、处置策略 | 规划中 |
+| M3 | 风险评估：可能性与影响矩阵、固有/剩余风险、处置策略 | 已完成 |
 | M4 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 规划中 |
 | M5 | 访谈、证据与整改：访谈记录、证据附件、整改任务 | 规划中 |
 | M6 | 报告与运营：报告生成、备份恢复、指标看板、加固与发布 | 规划中 |
 
-每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，风险评分留给 M3。
+每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，M3 交付评估批次与风险登记册，控制库与证据留给 M4、M5。
 
 ## 快速开始
 
@@ -54,6 +54,9 @@ aegis serve --port 8080 --reload
 aegis assets template --out assets.csv
 aegis assets import --engagement ENG-2026-0001 --file assets.csv
 aegis assets export --engagement ENG-2026-0001 --out exported.csv
+
+aegis risks list --engagement ENG-2026-0001
+aegis risks export --engagement ENG-2026-0001 --assessment RA-0001 --out register.csv
 ```
 
 ## 配置
@@ -75,7 +78,7 @@ aegis assets export --engagement ENG-2026-0001 --out exported.csv
 | 角色 | 权限 |
 |---|---|
 | `admin` | `*`，含用户管理与全部写操作 |
-| `consultant` | 客户/项目/干系人/资产/威胁读写，审计只读 |
+| `consultant` | 客户/项目/干系人/资产/威胁/风险读写，审计只读 |
 | `viewer` | 全部只读 |
 
 权限在服务层统一判定（`aegis/security/rbac.py`），Web 与 REST 共用同一套规则，避免两处实现漂移。
@@ -120,6 +123,14 @@ aegis assets export --engagement ENG-2026-0001 --out exported.csv
 | GET/PATCH/DELETE | `/api/threats/{id}` | 威胁详情 / 更新 / 删除 |
 | GET/POST | `/api/assets/{id}/threats` | 资产已关联威胁 / 关联一条威胁 |
 | PATCH/DELETE | `/api/asset-threats/{id}` | 更新 / 解除关联 |
+| GET/POST | `/api/engagements/{id}/assessments` | 评估批次列表 / 新建 |
+| GET/PUT | `/api/engagements/{id}/risk-appetite` | 读取 / 设置风险偏好 |
+| GET/PATCH/DELETE | `/api/assessments/{id}` | 批次详情 / 更新 / 删除（仅草稿） |
+| POST | `/api/assessments/{id}/issue` | 签发批次并冻结 |
+| GET | `/api/assessments/{id}/summary` | 批次汇总（分档、处置、均值、超偏好数） |
+| GET | `/api/assessments/{id}/compare/{baseline_id}` | 与基线批次逐项对比 |
+| GET/POST | `/api/assessments/{id}/risks` | 风险项列表 / 新增评分 |
+| GET/PATCH/DELETE | `/api/risks/{id}` | 风险项详情 / 更新 / 删除 |
 | GET | `/api/audit` | 审计事件查询（实体、动作、操作人、分页） |
 | GET | `/api/dashboard/summary` | 看板聚合数据 |
 
@@ -147,36 +158,75 @@ draft → scoping → fieldwork → reporting → closed → archived
 
 CSV 导入接受英文或中文表头，中文取值（如"业务资产""在用"）会自动映射；同名资产跳过而不覆盖，单次上限 1000 行，逐行报告错误。
 
+## 风险评估
+
+评估以批次（`RA-0001`）为单位，一个项目可以有多个批次，例如"2026 年度初评""整改后复评"。批次有两种状态：
+
+- `draft`：可增删改评分项，供顾问反复调整；
+- `issued`：签发后冻结，评分项、批次信息都不能再改，也不能重复签发。
+
+批次作为版本单元，是为了让报告引用的数字可以复现。改口径时新建一个批次，而不是覆盖历史。
+
+### 5×5 矩阵
+
+可能性与影响各取 1–5，分值 `L × I`（1–25），分四档：
+
+| 分值 | 等级 | 含义 |
+|---|---|---|
+| 1–4 | 低 | 可接受，常规流程处理 |
+| 5–9 | 中 | 需要明确责任人 |
+| 10–15 | 高 | 需要处置计划 |
+| 16–25 | 严重 | 需要管理层决策 |
+
+每个评分项同时记录固有（处置前）与残余（处置后）两套 L/I。新建时残余默认等于固有；填写处置理由后通常把残余调低。风险降幅由两者差值计算。
+
+处置策略四选一：缓解、接受、转移、规避。
+
+### 风险偏好
+
+项目级设置一个可接受分值上限，默认 9（中档上界）。评分项的残余分超过上限时标记为"超出偏好"，在详情页和汇总接口中单独计数。偏好只有一个阈值，不做按类别或按资产的分级偏好。
+
+### 版本对比
+
+同一项目的两个批次可以逐项对比。匹配键是快照中的资产编号与威胁编号，而不是数据库主键，因此资产改名后仍能对应。结果分为新增、移除、变化、未变四类，并统计残余分升高与降低的条数。
+
+风险项保存资产与威胁的编号、名称快照，关联外键为 `SET NULL`。资产或威胁被删除后，已签发的登记册仍然可读。
+
 ## 项目结构
 
 ```
 aegis/
   api/            REST 路由、依赖注入、统一响应
-  db/             引擎、自研迁移器、m0001_initial 与 m0002_assets
+  db/             引擎、自研迁移器、m0001 至 m0003
   models/         SQLAlchemy 模型
+  risk/           5×5 矩阵常量与分档函数
   services/       业务规则与权限校验的唯一入口
   security/       口令哈希、令牌、RBAC、输入校验
   web/            Jinja2 服务端渲染路由
-  templates/      17 个页面模板
+  templates/      21 个页面模板
   static/         原生 CSS/JS，无构建链
   config.py       环境配置与启动校验
   errors.py       统一错误码
   cli.py          运维命令
-tests/            112 个用例，覆盖配置、迁移、安全、API、Web、CLI
+tests/            131 个用例，覆盖配置、迁移、安全、API、Web、CLI
 docs/design/      设计取舍记录
 ```
 
 ## 测试
 
 ```bash
-pytest            # 112 passed
+pytest            # 131 passed
 ```
 
 测试使用内存 SQLite 与 `TestClient`，不依赖网络与外部服务，可在 CI 中直接运行。
 
 ## 设计取舍
 
-见 [docs/design/m1-foundation.md](docs/design/m1-foundation.md)，其中记录了自研迁移器、单进程限流、Bearer 优先、审计同事务写入等决定的理由。
+按里程碑记录：
+
+- [m1-foundation.md](docs/design/m1-foundation.md)：自研迁移器、单进程限流、Bearer 优先、审计同事务写入
+- [m2-assets.md](docs/design/m2-assets.md)：资产挂项目、派生分不落库、导入部分成功
+- [m3-risks.md](docs/design/m3-risks.md)：批次冻结、快照匹配、单一偏好阈值
 
 ## 许可
 
