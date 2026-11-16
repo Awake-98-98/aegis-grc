@@ -15,11 +15,15 @@ from aegis.models import (
     AuditEvent,
     Client,
     Engagement,
+    RiskAppetite,
+    RiskAssessment,
+    RiskItem,
     Session,
     Stakeholder,
     Threat,
     User,
 )
+from aegis.risk.matrix import DEFAULT_APPETITE
 from aegis.util.time import as_date_iso, as_iso
 
 
@@ -167,6 +171,81 @@ def asset_threat_public(
         "notes": link.notes,
         "created_at": as_iso(link.created_at),
         "updated_at": as_iso(link.updated_at),
+    }
+
+
+def risk_assessment_public(
+    row: RiskAssessment, *, item_count: int | None = None, summary: dict | None = None
+) -> dict:
+    payload = {
+        "id": row.id,
+        "engagement_id": row.engagement_id,
+        "code": row.code,
+        "title": row.title,
+        "status": row.status,
+        "assessor": row.assessor,
+        "summary": row.summary,
+        "issued_at": as_iso(row.issued_at),
+        "issued_by": row.issued_by,
+        "created_by": row.created_by,
+        "created_at": as_iso(row.created_at),
+        "updated_at": as_iso(row.updated_at),
+    }
+    if item_count is not None:
+        payload["item_count"] = item_count
+    if summary is not None:
+        payload["stats"] = summary
+    return payload
+
+
+def risk_item_public(
+    item: RiskItem, *, appetite_threshold: int | None = None
+) -> dict:
+    payload = {
+        "id": item.id,
+        "assessment_id": item.assessment_id,
+        "asset_id": item.asset_id,
+        "threat_id": item.threat_id,
+        "asset_threat_id": item.asset_threat_id,
+        "asset_code": item.asset_code,
+        "asset_name": item.asset_name,
+        "threat_code": item.threat_code,
+        "threat_name": item.threat_name,
+        "likelihood": item.likelihood,
+        "impact": item.impact,
+        "residual_likelihood": item.residual_likelihood,
+        "residual_impact": item.residual_impact,
+        "inherent_score": item.inherent_score,
+        "residual_score": item.residual_score,
+        "inherent_severity": item.inherent_severity,
+        "residual_severity": item.residual_severity,
+        "reduction": item.reduction,
+        "treatment": item.treatment,
+        "rationale": item.rationale,
+        "created_by": item.created_by,
+        "created_at": as_iso(item.created_at),
+        "updated_at": as_iso(item.updated_at),
+    }
+    if appetite_threshold is not None:
+        payload["within_appetite"] = item.residual_score <= appetite_threshold
+    return payload
+
+
+def risk_appetite_public(row: RiskAppetite | None) -> dict:
+    if row is None:
+        return {
+            "max_acceptable_score": DEFAULT_APPETITE,
+            "statement": "",
+            "updated_by": None,
+            "updated_at": None,
+            "is_default": True,
+        }
+    return {
+        "max_acceptable_score": row.max_acceptable_score,
+        "statement": row.statement,
+        "updated_by": row.updated_by,
+        "updated_at": as_iso(row.updated_at),
+        "is_default": False,
     }
 
 

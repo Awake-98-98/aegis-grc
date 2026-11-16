@@ -11,6 +11,8 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from aegis.risk.matrix import DEFAULT_APPETITE
+
 
 class BootstrapRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
@@ -164,3 +166,40 @@ class AssetThreatUpdateRequest(BaseModel):
     vulnerability: str | None = Field(default=None, max_length=4000)
     exposure: str | None = None
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class AssessmentCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    code: str | None = Field(default=None, max_length=32)
+    assessor: str = Field(default="", max_length=120)
+    summary: str = Field(default="", max_length=2000)
+
+
+class AssessmentUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    assessor: str | None = Field(default=None, max_length=120)
+    summary: str | None = Field(default=None, max_length=2000)
+
+
+class RiskCreateRequest(BaseModel):
+    asset_threat_id: str = Field(min_length=1, max_length=32)
+    likelihood: int = 3
+    impact: int = 3
+    residual_likelihood: int | None = None
+    residual_impact: int | None = None
+    treatment: str = "mitigate"
+    rationale: str = Field(default="", max_length=4000)
+
+
+class RiskUpdateRequest(BaseModel):
+    likelihood: int | None = None
+    impact: int | None = None
+    residual_likelihood: int | None = None
+    residual_impact: int | None = None
+    treatment: str | None = None
+    rationale: str | None = Field(default=None, max_length=4000)
+
+
+class RiskAppetiteRequest(BaseModel):
+    max_acceptable_score: int = DEFAULT_APPETITE
+    statement: str = Field(default="", max_length=2000)
