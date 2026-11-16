@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑评分' if mode == 'edit' else '新增评分' }}{% endblock %}
+{% block eyebrow %}风险评估 · {{ assessment.code }}{% endblock %}
+{% block heading %}{{ '编辑评分' if mode == 'edit' else '新增评分' }}{% endblock %}
+{% block content %}
+<section class="card">
+  <form method="post" action="{{ form_action }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    {% if mode == 'edit' %}
+    <div class="span-2">
+      <dl class="facts">
+        <dt>资产</dt><dd><span class="mono small">{{ item.asset_code }}</span> {{ item.asset_name }}</dd>
+        <dt>威胁</dt><dd><span class="mono small">{{ item.threat_code }}</span> {{ item.threat_name }}</dd>
+      </dl>
+    </div>
+    {% else %}
+    <label class="span-2">资产威胁对
+      <select name="asset_threat_id" required>
+        {% for link in pairs %}
+        <option value="{{ link.id }}">{{ link.asset.code }} {{ link.asset.name }} × {{ link.threat.code }} {{ link.threat.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not pairs %}<span class="hint">没有可评分的新配对。请先在资产清单中关联威胁，或本批次已覆盖全部配对。</span>{% endif %}
+    </label>
+    {% endif %}
+
+    <div class="span-2 cia-grid">
+      <label>可能性 L
+        <select name="likelihood">
+          {% for grade in grades %}
+          <option value="{{ grade }}" {{ 'selected' if (item and item.likelihood == grade) or (not item and grade == 3) else '' }}>{{ grade }} · {{ likelihood_labels[grade] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>影响 I
+        <select name="impact">
+          {% for grade in grades %}
+          <option value="{{ grade }}" {{ 'selected' if (item and item.impact == grade) or (not item and grade == 3) else '' }}>{{ grade }} · {{ impact_labels[grade] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>处置策略
+        <select name="treatment">
+          {% for name in treatments %}
+          <option value="{{ name }}" {{ 'selected' if (item and item.treatment == name) or (not item and name == 'mitigate') else '' }}>{{ treatment_labels[name] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint span-3">固有分值 = 可能性 × 影响，1–4 低，5–9 中，10–15 高，16–25 严重。</p>
+    </div>
+
+    <div class="span-2 cia-grid">
+      <label>残余可能性
+        <select name="residual_likelihood">
+          <option value="">沿用固有</option>
+          {% for grade in grades %}
+          <option value="{{ grade }}" {{ 'selected' if item and item.residual_likelihood == grade else '' }}>{{ grade }} · {{ likelihood_labels[grade] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>残余影响
+        <select name="residual_impact">
+          <option value="">沿用固有</option>
+          {% for grade in grades %}
+          <option value="{{ grade }}" {{ 'selected' if item and item.residual_impact == grade else '' }}>{{ grade }} · {{ impact_labels[grade] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint span-3">残余分值反映处置措施落地后的预期水平；留空则与固有相同。</p>
+    </div>
+
+    <label class="span-2">评分理由
+      <textarea name="rationale" rows="4" maxlength="4000" placeholder="引用暴露面、现有控制或客户约束">{{ item.rationale if item else '' }}</textarea>
+    </label>
+
+    <div class="form-actions span-2">
+      <button class="button primary" type="submit">保存</button>
+      <a class="button" href="/assessments/{{ assessment.id }}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

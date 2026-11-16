@@ -190,6 +190,27 @@ input[readonly], select[disabled] { background: #f2f4f7; color: var(--muted); }
 .badge-high { background: #fffaeb; color: #b54708; }
 .badge-medium { background: #eff8ff; color: #175cd3; }
 .badge-low { background: #f2f4f7; color: #475467; }
+.badge-issued { background: #ecfdf3; color: #027a48; }
+
+.danger { color: var(--danger); }
+
+.matrix { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.matrix th {
+  padding: 6px 4px; font-size: 12px; font-weight: 500; color: var(--muted);
+  text-align: center; border-bottom: 1px solid var(--line);
+}
+.matrix th:first-child { width: 110px; text-align: left; }
+.matrix td {
+  text-align: center; padding: 10px 4px; border: 2px solid #fff;
+  border-radius: 6px; font-size: 13px;
+}
+.matrix td strong { display: block; font-size: 16px; }
+.matrix td small { color: inherit; opacity: .7; font-size: 11px; }
+.matrix .matrix-empty { display: block; font-size: 16px; opacity: .45; }
+.matrix .sev-low { background: #f2f4f7; color: #475467; }
+.matrix .sev-medium { background: #eff8ff; color: #175cd3; }
+.matrix .sev-high { background: #fffaeb; color: #b54708; }
+.matrix .sev-critical { background: #fef3f2; color: #b42318; }
 
 .cia-grid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));

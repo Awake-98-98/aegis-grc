@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ assessment.code }} · {{ assessment.title }}{% endblock %}
+{% block eyebrow %}风险评估 · {{ engagement.code }}{% endblock %}
+{% block heading %}{{ assessment.title }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/engagements/{{ engagement.id }}/assessments">← 返回评估列表</a>
+  <span class="badge badge-{{ assessment.status }}">{{ status_labels_map.get(assessment.status, assessment.status) }}</span>
+  <span class="mono small">{{ assessment.code }}</span>
+  <span class="spacer"></span>
+  {% if can(current_user.role, 'risk:write') and assessment.status == 'draft' %}
+  <a class="button primary" href="/assessments/{{ assessment.id }}/risks/new">新增评分</a>
+  {% endif %}
+  <a class="button" href="/assessments/{{ assessment.id }}/compare">版本对比</a>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">风险项</span>
+    <strong class="stat-value">{{ summary.total }}</strong>
+    <small>缓解 {{ summary.by_treatment.get('mitigate', 0) }} · 接受 {{ summary.by_treatment.get('accept', 0) }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">超出偏好</span>
+    <strong class="stat-value">{{ summary.above_appetite }}</strong>
+    <small>残余分值上限 {{ summary.appetite_threshold }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">固有均值</span>
+    <strong class="stat-value">{{ summary.average_inherent }}</strong>
+    <small>残余均值 {{ summary.average_residual }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">严重 / 高</span>
+    <strong class="stat-value">{{ summary.by_severity.get('critical', 0) }} / {{ summary.by_severity.get('high', 0) }}</strong>
+    <small>按残余分值分档</small>
+  </div>
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head"><h3>固有风险矩阵</h3><span class="muted small">数字为落在该格的风险项数</span></div>
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>可能性 \ 影响</th>
+          {% for impact in range(1, 6) %}
+          <th>{{ impact }}<br><span class="muted small">{{ impact_labels[impact] }}</span></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for level in matrix_range %}
+        <tr>
+          <th>{{ level }}<br><span class="muted small">{{ likelihood_labels[level] }}</span></th>
+          {% for impact in range(1, 6) %}
+          {% set cell = matrix_cells.get((level, impact)) %}
+          <td class="matrix-cell sev-{{ matrix_severities[(level, impact)] }}">
+            {% if cell %}<strong>{{ cell.count }}</strong>{% else %}<span class="matrix-empty">·</span>{% endif %}
+            <small>{{ level * impact }}</small>
+          </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">分档：1–4 低，5–9 中，10–15 高，16–25 严重。矩阵按固有分值绘制。</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>批次信息</h3></div>
+    <dl class="facts">
+      <dt>编号</dt><dd class="mono">{{ assessment.code }}</dd>
+      <dt>状态</dt><dd>{{ status_labels_map.get(assessment.status, assessment.status) }}</dd>
+      <dt>评估人</dt><dd>{{ assessment.assessor or '-' }}</dd>
+      <dt>创建</dt><dd>{{ assessment.created_at | short_time }}</dd>
+      <dt>签发</dt><dd>{{ assessment.issued_at | short_time if assessment.issued_at else '未签发' }}</dd>
+      <dt>风险偏好</dt><dd>残余 ≤ {{ threshold }}{% if appetite is none %}（默认）{% endif %}</dd>
+    </dl>
+    <p class="notes">{{ assessment.summary or '尚未填写评估说明。' }}</p>
+
+    {% if can(current_user.role, 'risk:write') and assessment.status == 'draft' %}
+    <div class="toolbar">
+      <form method="post" action="/assessments/{{ assessment.id }}/issue" class="inline" data-confirm="签发后评分将不可修改，确认继续？">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button primary" type="submit">签发批次</button>
+      </form>
+      <form method="post" action="/assessments/{{ assessment.id }}/delete" class="inline" data-confirm="确认删除该评估批次及其全部评分？">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="link-button danger" type="submit">删除批次</button>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>风险登记册</h3>
+    <span class="muted small">残余分值超过偏好的行标红</span>
+  </div>
+  {% if items %}
+  <table class="table">
+    <thead>
+      <tr><th>资产</th><th>威胁</th><th>固有</th><th>残余</th><th>处置</th><th>偏好</th><th>理由</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td><span class="mono small">{{ item.asset_code }}</span><br>{{ item.asset_name }}</td>
+        <td><span class="mono small">{{ item.threat_code }}</span><br>{{ item.threat_name }}</td>
+        <td>
+          <strong>{{ item.inherent_score }}</strong> <span class="badge badge-{{ item.inherent_severity }}">{{ severity_labels[item.inherent_severity] }}</span>
+          <br><span class="muted small">L{{ item.likelihood }} × I{{ item.impact }}</span>
+        </td>
+        <td>
+          <strong>{{ item.residual_score }}</strong> <span class="badge badge-{{ item.residual_severity }}">{{ severity_labels[item.residual_severity] }}</span>
+          <br><span class="muted small">L{{ item.residual_likelihood }} × I{{ item.residual_impact }}</span>
+        </td>
+        <td>{{ treatment_labels.get(item.treatment, item.treatment) }}</td>
+        <td>
+          {% if item.residual_score <= threshold %}
+          <span class="badge badge-low">可接受</span>
+          {% else %}
+          <span class="badge badge-critical">超出</span>
+          {% endif %}
+        </td>
+        <td class="small">{{ item.rationale or '-' }}</td>
+        <td class="right">
+          {% if can(current_user.role, 'risk:write') and assessment.status == 'draft' %}
+          <a class="link-button" href="/risks/{{ item.id }}/edit">编辑</a>
+          <form method="post" action="/risks/{{ item.id }}/delete" class="inline" data-confirm="确认删除该评分？">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="link-button danger" type="submit">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">
+    {% if pairs %}尚未评分，可从 {{ pairs | length }} 个资产威胁对中新增。
+    {% else %}尚未评分。请先在资产清单中为资产关联威胁{% if can(current_user.role, 'asset:read') %} <a href="/engagements/{{ engagement.id }}/assets">前往资产清单</a>{% endif %}。{% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

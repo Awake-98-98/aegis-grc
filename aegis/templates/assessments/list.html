@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ engagement.name }} · 风险评估{% endblock %}
+{% block eyebrow %}咨询项目 · {{ engagement.code }}{% endblock %}
+{% block heading %}风险评估{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/engagements/{{ engagement.id }}">← 返回项目</a>
+  <span class="spacer"></span>
+  {% if can(current_user.role, 'asset:read') %}
+  <a class="button" href="/engagements/{{ engagement.id }}/assets">资产清单</a>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">评估批次</span>
+    <strong class="stat-value">{{ total }}</strong>
+    <small>每批覆盖一组资产威胁对</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">已签发</span>
+    <strong class="stat-value">{{ assessments | selectattr('status', 'equalto', 'issued') | list | length }}</strong>
+    <small>签发后不可再修改评分</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">风险偏好</span>
+    <strong class="stat-value">{{ threshold }}</strong>
+    <small>残余分值超过该值即超出偏好</small>
+  </div>
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head">
+      <h2>评估批次</h2>
+      <span class="muted small">按创建时间倒序</span>
+    </div>
+    {% if assessments %}
+    <table class="table">
+      <thead>
+        <tr><th>编号</th><th>标题</th><th>状态</th><th>评分项</th><th>评估人</th><th>签发时间</th></tr>
+      </thead>
+      <tbody>
+      {% for item in assessments %}
+        <tr>
+          <td class="mono"><a href="/assessments/{{ item.id }}">{{ item.code }}</a></td>
+          <td>{{ item.title }}<br><span class="muted small">{{ item.summary | truncate(48, true, '…') if item.summary else '未填写说明' }}</span></td>
+          <td><span class="badge badge-{{ item.status }}">{{ status_labels_map.get(item.status, item.status) }}</span></td>
+          <td>{{ item_counts.get(item.id, 0) }}</td>
+          <td>{{ item.assessor or '-' }}</td>
+          <td>{{ item.issued_at | short_time if item.issued_at else '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">尚无评估批次。先建立批次，再为资产威胁对打分。</p>
+    {% endif %}
+  </section>
+
+  <div class="stack">
+    {% if can(current_user.role, 'risk:write') %}
+    <section class="card">
+      <div class="card-head"><h3>新建批次</h3></div>
+      <form method="post" action="/engagements/{{ engagement.id }}/assessments" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>标题
+          <input type="text" name="title" maxlength="200" required placeholder="例如：2026 年首轮评估">
+        </label>
+        <label>评估人
+          <input type="text" name="assessor" maxlength="120" value="{{ current_user.display_name }}">
+        </label>
+        <label>说明
+          <textarea name="summary" rows="3" maxlength="2000" placeholder="评估范围、依据或约束"></textarea>
+        </label>
+        <button class="button primary" type="submit">建立草稿</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h3>风险偏好</h3></div>
+      <p class="muted small">当前可接受的最高残余分值：{{ threshold }}{% if appetite is none %}（默认）{% endif %}</p>
+      <form method="post" action="/engagements/{{ engagement.id }}/risk-appetite" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>可接受上限
+          <select name="max_acceptable_score">
+            {% for score in range(1, 26) %}
+            <option value="{{ score }}" {{ 'selected' if score == threshold else '' }}>{{ score }} · {{ severity_labels[appetite_severities[score]] }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>偏好声明
+          <textarea name="statement" rows="3" maxlength="2000">{{ appetite.statement if appetite else '' }}</textarea>
+        </label>
+        <button class="button" type="submit">保存偏好</button>
+      </form>
+    </section>
+    {% else %}
+    <section class="card">
+      <p class="muted small">当前角色只读，无法建立批次或调整风险偏好。</p>
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

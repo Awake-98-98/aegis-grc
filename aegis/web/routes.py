@@ -28,6 +28,16 @@ from aegis.security.validation import (
     ENGAGEMENT_STATUSES,
     ENGAGEMENT_TYPES,
     LEVELS,
+    RISK_ASSESSMENT_STATUSES,
+    RISK_TREATMENTS,
+)
+from aegis.risk.matrix import (
+    IMPACT_LABELS,
+    LIKELIHOOD_LABELS,
+    MATRIX_MAX,
+    MATRIX_MIN,
+    SEVERITY_LABELS,
+    severity_for,
 )
 from aegis.serializers import audit_public
 from aegis.services.asset_import import AssetImportService
@@ -36,6 +46,13 @@ from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
 from aegis.services.dashboard import DashboardService
 from aegis.services.engagements import ALLOWED_TRANSITIONS, EngagementService
+from aegis.services.risks import (
+    ASSESSMENT_STATUS_LABELS,
+    DEFAULT_APPETITE,
+    TREATMENT_LABELS,
+    RiskAssessmentService,
+    RiskService,
+)
 from aegis.services.stakeholders import StakeholderService
 from aegis.services.threats import ThreatService
 
@@ -465,6 +482,9 @@ def engagement_detail_page(
         lead=lead,
         timeline=timeline,
         asset_summary=AssetService(db).summary(ctx, engagement_id),
+        assessment_count=RiskAssessmentService(db).list(
+            ctx, engagement_id, page_size=1
+        )[1],
         next_statuses=sorted(ALLOWED_TRANSITIONS.get(engagement.status, set())),
         statuses=ENGAGEMENT_STATUSES,
         levels=LEVELS,
@@ -862,6 +882,340 @@ async def asset_unlink_threat_submit(
     asset_id = link.asset_id if link else ""
     AssetService(db).unlink_threat(ctx, link_id, ip=ip, user_agent=user_agent)
     return _redirect(f"/assets/{asset_id}")
+
+
+# --------------------------------------------------------------------------- risk
+@router.get("/engagements/{engagement_id}/assessments", response_class=HTMLResponse)
+def assessments_page(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    engagement = EngagementService(db).get_for(ctx, engagement_id)
+    service = RiskAssessmentService(db)
+    rows, total, page, page_size = service.list(ctx, engagement_id, page_size=40)
+    counts = service.item_counts([row.id for row in rows])
+    appetite = service.appetite(ctx, engagement_id)
+    return _render(
+        request,
+        "assessments/list.html",
+        ctx,
+        nav="engagements",
+        engagement=engagement,
+        assessments=rows,
+        item_counts=counts,
+        total=total,
+        appetite=appetite,
+        threshold=appetite.max_acceptable_score if appetite else DEFAULT_APPETITE,
+        statuses=RISK_ASSESSMENT_STATUSES,
+        status_labels_map=ASSESSMENT_STATUS_LABELS,
+        severity_labels=SEVERITY_LABELS,
+        appetite_severities={
+            score: severity_for(score) for score in range(1, 26)
+        },
+    )
+
+
+@router.post("/engagements/{engagement_id}/assessments", response_class=HTMLResponse)
+async def assessment_create_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    assessment = RiskAssessmentService(db).create(
+        ctx,
+        engagement_id,
+        title=form.get("title", ""),
+        assessor=form.get("assessor", ""),
+        summary=form.get("summary", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assessments/{assessment.id}")
+
+
+@router.post("/engagements/{engagement_id}/risk-appetite", response_class=HTMLResponse)
+async def risk_appetite_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    RiskAssessmentService(db).set_appetite(
+        ctx,
+        engagement_id,
+        max_acceptable_score=form.get("max_acceptable_score", str(DEFAULT_APPETITE)),
+        statement=form.get("statement", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/engagements/{engagement_id}/assessments")
+
+
+@router.get("/assessments/{assessment_id}", response_class=HTMLResponse)
+def assessment_detail_page(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = RiskAssessmentService(db)
+    assessment = service.get_for(ctx, assessment_id)
+    engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
+    items = service.items_for(assessment.id)
+    appetite = service.appetite(ctx, assessment.engagement_id)
+    threshold = appetite.max_acceptable_score if appetite else 9
+    scored = {(item.asset_id, item.threat_id) for item in items}
+    pairs = [
+        link
+        for link in AssetService(db).links_for_engagement(ctx, assessment.engagement_id)
+        if (link.asset_id, link.threat_id) not in scored
+    ]
+    matrix_cells: dict[tuple[int, int], dict] = {}
+    for item in items:
+        key = (item.likelihood, item.impact)
+        cell = matrix_cells.setdefault(key, {"count": 0, "severity": item.inherent_severity})
+        cell["count"] += 1
+    return _render(
+        request,
+        "assessments/detail.html",
+        ctx,
+        nav="engagements",
+        assessment=assessment,
+        engagement=engagement,
+        items=items,
+        summary=service.summary(ctx, assessment.id),
+        appetite=appetite,
+        threshold=threshold,
+        pairs=pairs,
+        matrix_cells=matrix_cells,
+        matrix_severities={
+            (level, impact): severity_for(level * impact)
+            for level in range(MATRIX_MIN, MATRIX_MAX + 1)
+            for impact in range(MATRIX_MIN, MATRIX_MAX + 1)
+        },
+        matrix_range=range(MATRIX_MAX, MATRIX_MIN - 1, -1),
+        likelihood_labels=LIKELIHOOD_LABELS,
+        impact_labels=IMPACT_LABELS,
+        severity_labels=SEVERITY_LABELS,
+        treatment_labels=TREATMENT_LABELS,
+        status_labels_map=ASSESSMENT_STATUS_LABELS,
+    )
+
+
+@router.post("/assessments/{assessment_id}/issue", response_class=HTMLResponse)
+async def assessment_issue_submit(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    RiskAssessmentService(db).issue(
+        ctx, assessment_id, ip=ip, user_agent=user_agent
+    )
+    return _redirect(f"/assessments/{assessment_id}")
+
+
+@router.post("/assessments/{assessment_id}/delete", response_class=HTMLResponse)
+async def assessment_delete_submit(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    assessment = RiskAssessmentService(db).get_for(ctx, assessment_id)
+    engagement_id = assessment.engagement_id
+    RiskAssessmentService(db).delete(
+        ctx, assessment_id, ip=ip, user_agent=user_agent
+    )
+    return _redirect(f"/engagements/{engagement_id}/assessments")
+
+
+@router.get("/assessments/{assessment_id}/risks/new", response_class=HTMLResponse)
+def risk_new_page(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = RiskAssessmentService(db)
+    assessment = service.get_for(ctx, assessment_id)
+    engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
+    items = service.items_for(assessment.id)
+    scored = {(item.asset_id, item.threat_id) for item in items}
+    pairs = [
+        link
+        for link in AssetService(db).links_for_engagement(ctx, assessment.engagement_id)
+        if (link.asset_id, link.threat_id) not in scored
+    ]
+    return _render(
+        request,
+        "assessments/form.html",
+        ctx,
+        nav="engagements",
+        mode="create",
+        assessment=assessment,
+        engagement=engagement,
+        item=None,
+        pairs=pairs,
+        form_action=f"/assessments/{assessment.id}/risks",
+        treatments=RISK_TREATMENTS,
+        treatment_labels=TREATMENT_LABELS,
+        grades=range(MATRIX_MIN, MATRIX_MAX + 1),
+        likelihood_labels=LIKELIHOOD_LABELS,
+        impact_labels=IMPACT_LABELS,
+    )
+
+
+@router.post("/assessments/{assessment_id}/risks", response_class=HTMLResponse)
+async def risk_create_submit(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    RiskService(db).add(
+        ctx,
+        assessment_id,
+        asset_threat_id=form.get("asset_threat_id", ""),
+        likelihood=form.get("likelihood", "3"),
+        impact=form.get("impact", "3"),
+        residual_likelihood=form.get("residual_likelihood") or None,
+        residual_impact=form.get("residual_impact") or None,
+        treatment=form.get("treatment", "mitigate"),
+        rationale=form.get("rationale", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assessments/{assessment_id}")
+
+
+@router.get("/risks/{risk_id}/edit", response_class=HTMLResponse)
+def risk_edit_page(
+    risk_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    item = RiskService(db).get_for(ctx, risk_id)
+    assessment = RiskAssessmentService(db).get_for(ctx, item.assessment_id)
+    engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
+    return _render(
+        request,
+        "assessments/form.html",
+        ctx,
+        nav="engagements",
+        mode="edit",
+        assessment=assessment,
+        engagement=engagement,
+        item=item,
+        pairs=[],
+        form_action=f"/risks/{item.id}/edit",
+        treatments=RISK_TREATMENTS,
+        treatment_labels=TREATMENT_LABELS,
+        grades=range(MATRIX_MIN, MATRIX_MAX + 1),
+        likelihood_labels=LIKELIHOOD_LABELS,
+        impact_labels=IMPACT_LABELS,
+    )
+
+
+@router.post("/risks/{risk_id}/edit", response_class=HTMLResponse)
+async def risk_edit_submit(
+    risk_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    item = RiskService(db).update(
+        ctx,
+        risk_id,
+        likelihood=form.get("likelihood"),
+        impact=form.get("impact"),
+        residual_likelihood=form.get("residual_likelihood"),
+        residual_impact=form.get("residual_impact"),
+        treatment=form.get("treatment"),
+        rationale=form.get("rationale"),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assessments/{item.assessment_id}")
+
+
+@router.post("/risks/{risk_id}/delete", response_class=HTMLResponse)
+async def risk_delete_submit(
+    risk_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    item = RiskService(db).get_for(ctx, risk_id)
+    assessment_id = item.assessment_id
+    RiskService(db).delete(ctx, risk_id, ip=ip, user_agent=user_agent)
+    return _redirect(f"/assessments/{assessment_id}")
+
+
+@router.get("/assessments/{assessment_id}/compare", response_class=HTMLResponse)
+def assessment_compare_page(
+    assessment_id: str,
+    request: Request,
+    against: str = "",
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = RiskAssessmentService(db)
+    assessment = service.get_for(ctx, assessment_id)
+    engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
+    candidates, _, _, _ = service.list(ctx, assessment.engagement_id, page_size=200)
+    candidates = [row for row in candidates if row.id != assessment.id]
+    result = service.compare(ctx, assessment.id, against) if against else None
+    return _render(
+        request,
+        "assessments/compare.html",
+        ctx,
+        nav="engagements",
+        assessment=assessment,
+        engagement=engagement,
+        candidates=candidates,
+        against=against,
+        result=result,
+        severity_labels=SEVERITY_LABELS,
+        treatment_labels=TREATMENT_LABELS,
+    )
 
 
 # ---------------------------------------------------------------------------- audit

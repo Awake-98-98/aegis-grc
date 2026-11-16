@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ assessment.code }} · 版本对比{% endblock %}
+{% block eyebrow %}风险评估 · {{ engagement.code }}{% endblock %}
+{% block heading %}版本对比{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/assessments/{{ assessment.id }}">← 返回 {{ assessment.code }}</a>
+  <span class="spacer"></span>
+  <form method="get" action="/assessments/{{ assessment.id }}/compare" class="inline-form">
+    <select name="against">
+      <option value="">选择基线批次</option>
+      {% for row in candidates %}
+      <option value="{{ row.id }}" {{ 'selected' if row.id == against else '' }}>{{ row.code }} · {{ row.title }}（{{ '已签发' if row.status == 'issued' else '草稿' }}）</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">对比</button>
+  </form>
+</div>
+
+{% if result %}
+{% set change_labels = {'added': '新增', 'removed': '移除', 'changed': '变化', 'unchanged': '未变'} %}
+{% set change_classes = {'added': 'medium', 'removed': 'low', 'changed': 'high', 'unchanged': 'low'} %}
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">对比总数</span>
+    <strong class="stat-value">{{ result.summary.total }}</strong>
+    <small>基线 {{ result.baseline.code }} → 当前 {{ result.current.code }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">新增 / 移除</span>
+    <strong class="stat-value">{{ result.summary.added }} / {{ result.summary.removed }}</strong>
+    <small>仅在一侧出现的资产威胁对</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">分值变化</span>
+    <strong class="stat-value">{{ result.summary.changed }}</strong>
+    <small>升高 {{ result.summary.increased }} · 降低 {{ result.summary.decreased }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">未变化</span>
+    <strong class="stat-value">{{ result.summary.unchanged }}</strong>
+    <small>等级、处置策略均保持一致</small>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>逐项对比</h3>
+    <span class="muted small">差值为残余分值变化</span>
+  </div>
+  <table class="table">
+    <thead>
+      <tr><th>资产</th><th>威胁</th><th>变化</th><th>基线残余</th><th>当前残余</th><th>差值</th><th>处置变化</th></tr>
+    </thead>
+    <tbody>
+    {% for row in result.rows %}
+      <tr>
+        <td><span class="mono small">{{ row.asset_code }}</span><br>{{ row.asset_name }}</td>
+        <td><span class="mono small">{{ row.threat_code }}</span><br>{{ row.threat_name }}</td>
+        <td><span class="badge badge-{{ change_classes[row.change] }}">{{ change_labels[row.change] }}</span></td>
+        <td>
+          {% if row.before %}{{ row.before.residual_score }}
+          <span class="badge badge-{{ row.before.residual_severity }}">{{ severity_labels[row.before.residual_severity] }}</span>
+          {% else %}-{% endif %}
+        </td>
+        <td>
+          {% if row.after %}{{ row.after.residual_score }}
+          <span class="badge badge-{{ row.after.residual_severity }}">{{ severity_labels[row.after.residual_severity] }}</span>
+          {% else %}-{% endif %}
+        </td>
+        <td>
+          {% if row.delta_residual is not none %}
+          <span class="{{ 'danger' if row.delta_residual > 0 else 'muted' }}">{{ '%+d' % row.delta_residual }}</span>
+          {% else %}-{% endif %}
+        </td>
+        <td class="small">
+          {% if row.before and row.after %}
+            {{ treatment_labels.get(row.before.treatment, row.before.treatment) }} →
+            {{ treatment_labels.get(row.after.treatment, row.after.treatment) }}
+          {% elif row.after %}
+            {{ treatment_labels.get(row.after.treatment, row.after.treatment) }}
+          {% elif row.before %}
+            {{ treatment_labels.get(row.before.treatment, row.before.treatment) }}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<section class="card">
+  <p class="empty">选择一个基线批次后显示差异。基线通常是上一轮已签发的评估。</p>
+</section>
+{% endif %}
+{% endblock %}
