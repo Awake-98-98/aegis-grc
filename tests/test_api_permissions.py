@@ -129,6 +129,60 @@ def test_viewer_can_read_assets_but_not_write_them(
     assert denied.json()["error"]["code"] == "AEG-3002"
 
 
+def test_viewer_can_read_risks_but_not_write_them(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "风险权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "风险权限项目"},
+        headers=admin,
+    ).json()["data"]
+    assessment = client.post(
+        f"/api/engagements/{engagement['id']}/assessments",
+        json={"title": "权限评估"},
+        headers=admin,
+    ).json()["data"]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "viewer3@aegis.test", "viewer")
+    token = _token_for(client, "viewer3@aegis.test")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.get(f"/api/assessments/{assessment['id']}", headers=headers).status_code == 200
+    denied = client.post(
+        f"/api/engagements/{engagement['id']}/assessments",
+        headers=headers,
+        json={"title": "越权评估"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "AEG-3002"
+
+
+def test_consultant_can_create_assessment(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "评估权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "评估权限项目"},
+        headers=admin,
+    ).json()["data"]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "consultant3@aegis.test", "consultant")
+    token = _token_for(client, "consultant3@aegis.test")
+    response = client.post(
+        f"/api/engagements/{engagement['id']}/assessments",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "顾问建立的评估"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["data"]["code"] == "RA-0001"
+
+
 def test_consultant_can_import_assets(client: TestClient, bootstrap_admin: dict) -> None:
     admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
     client.post("/api/clients", json={"name": "导入权限客户"}, headers=admin)

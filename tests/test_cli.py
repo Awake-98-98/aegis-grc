@@ -150,3 +150,63 @@ def test_assets_template(tmp_path: Path, capsys) -> None:
     assert out_path.read_text(encoding="utf-8").lstrip("\ufeff").startswith(
         "name,asset_type,category"
     )
+
+
+def test_risks_list_and_export(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    capsys.readouterr()
+
+    assert (
+        main(["--home", home, "risks", "list", "--engagement", "ENG-2026-0001"]) == 0
+    )
+    listing = capsys.readouterr().out
+    assert "RA-0001" in listing
+    assert "RA-0002" in listing
+    assert "issued" in listing
+
+    out_path = tmp_path / "register.csv"
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "risks",
+                "export",
+                "--engagement",
+                "ENG-2026-0001",
+                "--assessment",
+                "RA-0001",
+                "--out",
+                str(out_path),
+            ]
+        )
+        == 0
+    )
+    exported = out_path.read_text(encoding="utf-8").lstrip("\ufeff")
+    assert exported.startswith("asset_code,asset_name,threat_code")
+    assert "AST-0001" in exported
+    assert "mitigate" in exported
+
+
+def test_risks_export_unknown_assessment(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "risks",
+                "export",
+                "--engagement",
+                "ENG-2026-0001",
+                "--assessment",
+                "RA-9999",
+            ]
+        )
+        == 2
+    )
+    assert "assessment not found" in capsys.readouterr().err
