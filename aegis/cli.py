@@ -23,6 +23,9 @@ from aegis.models import (
     AssetThreat,
     Client,
     Engagement,
+    RiskAppetite,
+    RiskAssessment,
+    RiskItem,
     Session as LoginSession,
     Stakeholder,
     Threat,
@@ -33,6 +36,7 @@ from aegis.services.assets import AssetService
 from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
 from aegis.services.engagements import EngagementService
+from aegis.services.risks import RiskAssessmentService, RiskService
 from aegis.services.stakeholders import StakeholderService
 from aegis.services.threats import ThreatService
 from aegis.util.time import utcnow
@@ -75,6 +79,15 @@ def _build_parser() -> argparse.ArgumentParser:
     assets_export = assets_sub.add_parser("export", help="export the asset list as CSV")
     assets_export.add_argument("--engagement", required=True)
     assets_export.add_argument("--out", type=Path, default=None)
+
+    risks = sub.add_parser("risks", help="risk assessment utilities")
+    risks_sub = risks.add_subparsers(dest="risks_command", required=True)
+    risks_list = risks_sub.add_parser("list", help="list assessment batches of an engagement")
+    risks_list.add_argument("--engagement", required=True, help="engagement code")
+    risks_export = risks_sub.add_parser("export", help="export one register as CSV")
+    risks_export.add_argument("--engagement", required=True)
+    risks_export.add_argument("--assessment", required=True, help="assessment code, e.g. RA-0001")
+    risks_export.add_argument("--out", type=Path, default=None)
     return parser
 
 
@@ -209,6 +222,17 @@ def cmd_status(settings: Settings) -> int:
             ),
             "threat_links": int(
                 db.execute(select(func.count(AssetThreat.id)).select_from(AssetThreat)).scalar() or 0
+            ),
+            "assessments": int(
+                db.execute(select(func.count(RiskAssessment.id)).select_from(RiskAssessment)).scalar()
+                or 0
+            ),
+            "risk_items": int(
+                db.execute(select(func.count(RiskItem.id)).select_from(RiskItem)).scalar() or 0
+            ),
+            "risk_appetite": int(
+                db.execute(select(func.count(RiskAppetite.id)).select_from(RiskAppetite)).scalar()
+                or 0
             ),
         }
         status = schema_status(engine)
@@ -440,35 +464,35 @@ def cmd_seed_demo(args, settings: Settings) -> int:
             actor="nature",
         )
 
-        assets.link_threat(
+        mes_ransom = assets.link_threat(
             ctx,
             mes.id,
             threat_id=ransomware.id,
             vulnerability="生产网与办公网未做 VLAN 隔离，终端可直接访问 MES 端口。",
             exposure="high",
         )
-        assets.link_threat(
+        bastion_phishing = assets.link_threat(
             ctx,
             bastion.id,
             threat_id=phishing.id,
             vulnerability="堡垒机未启用多因素认证，仅靠静态口令。",
             exposure="high",
         )
-        assets.link_threat(
+        erp_ransom = assets.link_threat(
             ctx,
             erp.id,
             threat_id=ransomware.id,
             vulnerability="数据库备份每日全量落本地 NAS，未做离线副本。",
             exposure="medium",
         )
-        assets.link_threat(
+        switch_power = assets.link_threat(
             ctx,
             core_switch.id,
             threat_id=power.id,
             vulnerability="机房 UPS 电池组已超服役年限，未做带载放电测试。",
             exposure="medium",
         )
-        assets.link_threat(
+        mes_mistake = assets.link_threat(
             ctx,
             mes.id,
             threat_id=mistake.id,
@@ -476,10 +500,74 @@ def cmd_seed_demo(args, settings: Settings) -> int:
             exposure="medium",
         )
 
+        assessments = RiskAssessmentService(db)
+        risks = RiskService(db)
+        assessments.set_appetite(
+            ctx,
+            e1.id,
+            max_acceptable_score=12,
+            statement="残余分值不超过 12，超过需提交管理层评审。",
+        )
+        first = assessments.create(
+            ctx,
+            e1.id,
+            title="2026 年首轮风险评估",
+            assessor="演示顾问",
+            summary="覆盖核心业务系统与支撑设施，按 5×5 矩阵完成首轮打分。",
+        )
+        first_scores = [
+            (mes_ransom, 4, 4, 3, 3, "mitigate", "已完成生产网分区，离线备份待落地。"),
+            (erp_ransom, 4, 5, 3, 4, "mitigate", "备份保留 30 天，异地副本仍在建设中。"),
+            (bastion_phishing, 4, 4, 2, 3, "mitigate", "上线多因素认证后可显著降低凭据泄露影响。"),
+            (switch_power, 2, 5, 2, 3, "mitigate", "更换 UPS 电池组并增加带载测试。"),
+            (mes_mistake, 3, 3, 2, 2, "mitigate", "变更审批流已纳入运维平台。"),
+        ]
+        for link, likelihood, impact, residual_l, residual_i, treatment, rationale in first_scores:
+            risks.add(
+                ctx,
+                first.id,
+                asset_threat_id=link.id,
+                likelihood=likelihood,
+                impact=impact,
+                residual_likelihood=residual_l,
+                residual_impact=residual_i,
+                treatment=treatment,
+                rationale=rationale,
+            )
+        assessments.issue(ctx, first.id)
+
+        second = assessments.create(
+            ctx,
+            e1.id,
+            title="2026 年复评（草稿）",
+            assessor="演示顾问",
+            summary="复核首轮处置措施落地情况，供版本对比使用。",
+        )
+        second_scores = [
+            (mes_ransom, 4, 4, 2, 3, "mitigate", "离线备份已上线，按月演练恢复。"),
+            (erp_ransom, 4, 5, 3, 3, "mitigate", "异地副本完成，恢复演练通过。"),
+            (bastion_phishing, 4, 4, 2, 2, "mitigate", "多因素认证覆盖全部运维账号。"),
+            (switch_power, 2, 5, 1, 3, "mitigate", "电池组更换完成，季度带载测试。"),
+            (mes_mistake, 3, 3, 2, 2, "accept", "客户接受残余风险，保留审批留痕。"),
+        ]
+        for link, likelihood, impact, residual_l, residual_i, treatment, rationale in second_scores:
+            risks.add(
+                ctx,
+                second.id,
+                asset_threat_id=link.id,
+                likelihood=likelihood,
+                impact=impact,
+                residual_likelihood=residual_l,
+                residual_impact=residual_i,
+                treatment=treatment,
+                rationale=rationale,
+            )
+
         print("demo data loaded:")
         print(f"  clients:     {north.code}, {bank.code}, {clinic.code}")
         print(f"  engagements: {e1.code}, {e2.code}, {e3.code}")
         print(f"  assets:      {e1.code} 下有 5 项资产、4 类威胁、5 条关联")
+        print(f"  risks:       {e1.code} 下有 2 个评估批次（1 已签发、1 草稿）")
         if created_admin:
             print(f"  demo admin:  {demo_email} / {demo_password}")
     engine.dispose()
@@ -570,6 +658,83 @@ def cmd_assets(args, settings: Settings) -> int:
         engine.dispose()
 
 
+def cmd_risks(args, settings: Settings) -> int:
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+
+            service = RiskAssessmentService(db)
+            if args.risks_command == "list":
+                rows, _, _, _ = service.list(ctx, engagement.id, page_size=200)
+                if not rows:
+                    print(f"no assessments for {engagement.code}")
+                    return 0
+                print(f"{'code':<10}{'status':<8}{'items':<7}{'residual':<10}title")
+                for row in rows:
+                    stats = service.summary(ctx, row.id)
+                    print(
+                        f"{row.code:<10}{row.status:<8}{stats['total']:<7}"
+                        f"{stats['average_residual']:<10}{row.title}"
+                    )
+                return 0
+
+            assessment = db.execute(
+                select(RiskAssessment).where(
+                    RiskAssessment.engagement_id == engagement.id,
+                    RiskAssessment.code == args.assessment,
+                )
+            ).scalar_one_or_none()
+            if assessment is None:
+                print(
+                    f"error: assessment not found: {args.assessment}", file=sys.stderr
+                )
+                return 2
+
+            lines = [
+                "asset_code,asset_name,threat_code,threat_name,likelihood,impact,"
+                "inherent_score,inherent_severity,residual_likelihood,residual_impact,"
+                "residual_score,residual_severity,treatment,rationale"
+            ]
+            for item in service.items_for(assessment.id):
+                lines.append(
+                    ",".join(
+                        _csv_cell(value)
+                        for value in (
+                            item.asset_code,
+                            item.asset_name,
+                            item.threat_code,
+                            item.threat_name,
+                            item.likelihood,
+                            item.impact,
+                            item.inherent_score,
+                            item.inherent_severity,
+                            item.residual_likelihood,
+                            item.residual_impact,
+                            item.residual_score,
+                            item.residual_severity,
+                            item.treatment,
+                            item.rationale,
+                        )
+                    )
+                )
+            text = "\ufeff" + "\n".join(lines) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+                print(f"exported {len(lines) - 1} risks to {args.out}")
+            else:
+                sys.stdout.write(text)
+            return 0
+    finally:
+        engine.dispose()
+
+
 def _operating_user(db) -> User:
     """CLI actions need an actor; use the oldest active administrator."""
     admin = db.execute(
@@ -598,6 +763,7 @@ COMMANDS = {
     "seed-demo": cmd_seed_demo,
     "prune-sessions": cmd_prune_sessions,
     "assets": cmd_assets,
+    "risks": cmd_risks,
 }
 
 
