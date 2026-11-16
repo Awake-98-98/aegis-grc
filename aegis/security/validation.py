@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from aegis.errors import ValidationFailure
+from aegis.risk.matrix import MATRIX_MAX, MATRIX_MIN
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -48,6 +49,11 @@ THREAT_CATEGORIES = (
     "other",
 )
 THREAT_ACTORS = ("external", "insider", "third_party", "nature", "accidental")
+
+RISK_TREATMENTS = ("mitigate", "accept", "transfer", "avoid")
+RISK_ASSESSMENT_STATUSES = ("draft", "issued")
+APPETITE_MIN = 1
+APPETITE_MAX = 25
 
 
 def require_text(
@@ -142,3 +148,42 @@ def cia_grade(value: int | str | None, field: str, *, default: int = 2) -> int:
             details={"field": field, "min": CIA_MIN, "max": CIA_MAX},
         )
     return grade
+
+
+def matrix_grade(value: int | str | None, field: str, *, default: int | None = 3) -> int:
+    """Grade on the 1-5 likelihood or impact scale."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if default is not None:
+            return default
+        raise ValidationFailure(f"{field} is required", details={"field": field})
+    try:
+        grade = int(value)
+    except (TypeError, ValueError):
+        raise ValidationFailure(
+            f"{field} must be an integer between {MATRIX_MIN} and {MATRIX_MAX}",
+            details={"field": field, "min": MATRIX_MIN, "max": MATRIX_MAX},
+        ) from None
+    if grade < MATRIX_MIN or grade > MATRIX_MAX:
+        raise ValidationFailure(
+            f"{field} must be between {MATRIX_MIN} and {MATRIX_MAX}",
+            details={"field": field, "min": MATRIX_MIN, "max": MATRIX_MAX},
+        )
+    return grade
+
+
+def appetite_score(value: int | str | None, field: str = "max_acceptable_score") -> int:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise ValidationFailure(f"{field} is required", details={"field": field})
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        raise ValidationFailure(
+            f"{field} must be an integer between {APPETITE_MIN} and {APPETITE_MAX}",
+            details={"field": field, "min": APPETITE_MIN, "max": APPETITE_MAX},
+        ) from None
+    if score < APPETITE_MIN or score > APPETITE_MAX:
+        raise ValidationFailure(
+            f"{field} must be between {APPETITE_MIN} and {APPETITE_MAX}",
+            details={"field": field, "min": APPETITE_MIN, "max": APPETITE_MAX},
+        )
+    return score

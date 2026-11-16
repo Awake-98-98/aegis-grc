@@ -1,0 +1,27 @@
+"""Risk scoring primitives."""
+
+from .matrix import (
+    DEFAULT_APPETITE,
+    IMPACT_DESCRIPTIONS,
+    IMPACT_LABELS,
+    LIKELIHOOD_DESCRIPTIONS,
+    LIKELIHOOD_LABELS,
+    MATRIX_MAX,
+    MATRIX_MIN,
+    SEVERITY_LABELS,
+    SEVERITY_ORDER,
+    severity_for,
+)
+
+__all__ = [
+    "DEFAULT_APPETITE",
+    "IMPACT_DESCRIPTIONS",
+    "IMPACT_LABELS",
+    "LIKELIHOOD_DESCRIPTIONS",
+    "LIKELIHOOD_LABELS",
+    "MATRIX_MAX",
+    "MATRIX_MIN",
+    "SEVERITY_LABELS",
+    "SEVERITY_ORDER",
+    "severity_for",
+]

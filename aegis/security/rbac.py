@@ -24,6 +24,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "asset:write",
             "threat:read",
             "threat:write",
+            "risk:read",
+            "risk:write",
             "stakeholder:write",
             "audit:read",
         }
@@ -35,6 +37,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
             "engagement:read",
             "asset:read",
             "threat:read",
+            "risk:read",
             "audit:read",
         }
     ),
