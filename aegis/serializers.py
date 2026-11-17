@@ -14,11 +14,15 @@ from aegis.models import (
     AssetThreat,
     AuditEvent,
     Client,
+    Control,
+    ControlFramework,
     Engagement,
     RiskAppetite,
     RiskAssessment,
+    RiskControlLink,
     RiskItem,
     Session,
+    SoAEntry,
     Stakeholder,
     Threat,
     User,
@@ -246,6 +250,74 @@ def risk_appetite_public(row: RiskAppetite | None) -> dict:
         "updated_by": row.updated_by,
         "updated_at": as_iso(row.updated_at),
         "is_default": False,
+    }
+
+
+def control_framework_public(
+    row: ControlFramework, *, control_count: int | None = None
+) -> dict:
+    payload = {
+        "id": row.id,
+        "code": row.code,
+        "name": row.name,
+        "version": row.version,
+        "publisher": row.publisher,
+        "kind": row.kind,
+        "description": row.description,
+        "created_at": as_iso(row.created_at),
+        "updated_at": as_iso(row.updated_at),
+    }
+    if control_count is not None:
+        payload["control_count"] = control_count
+    return payload
+
+
+def control_public(control: Control, *, framework_code: str | None = None) -> dict:
+    if framework_code is None and control.framework is not None:
+        framework_code = control.framework.code
+    return {
+        "id": control.id,
+        "framework_id": control.framework_id,
+        "framework_code": framework_code or "",
+        "code": control.code,
+        "title": control.title,
+        "title_en": control.title_en,
+        "domain": control.domain,
+        "domain_label": control.domain_label,
+        "guidance": control.guidance,
+        "sort_order": control.sort_order,
+    }
+
+
+def soa_entry_public(entry: SoAEntry, *, control: Control | None = None) -> dict:
+    control = control or entry.control
+    return {
+        "id": entry.id,
+        "engagement_id": entry.engagement_id,
+        "control_id": entry.control_id,
+        "applicable": bool(entry.applicable),
+        "implementation_status": entry.implementation_status,
+        "justification": entry.justification,
+        "owner": entry.owner,
+        "notes": entry.notes,
+        "updated_by": entry.updated_by,
+        "updated_at": as_iso(entry.updated_at),
+        "control": control_public(control) if control else None,
+    }
+
+
+def risk_control_link_public(link: RiskControlLink) -> dict:
+    control = link.control
+    return {
+        "id": link.id,
+        "risk_item_id": link.risk_item_id,
+        "control_id": link.control_id,
+        "coverage": link.coverage,
+        "notes": link.notes,
+        "created_by": link.created_by,
+        "created_at": as_iso(link.created_at),
+        "updated_at": as_iso(link.updated_at),
+        "control": control_public(control) if control else None,
     }
 
 

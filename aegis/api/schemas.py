@@ -203,3 +203,21 @@ class RiskUpdateRequest(BaseModel):
 class RiskAppetiteRequest(BaseModel):
     max_acceptable_score: int = DEFAULT_APPETITE
     statement: str = Field(default="", max_length=2000)
+
+
+class SoAGenerateRequest(BaseModel):
+    framework_id: str = Field(min_length=1, max_length=32)
+
+
+class SoAUpdateRequest(BaseModel):
+    applicable: bool | None = None
+    implementation_status: str | None = None
+    justification: str | None = Field(default=None, max_length=2000)
+    owner: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class RiskControlLinkRequest(BaseModel):
+    control_id: str = Field(min_length=1, max_length=32)
+    coverage: str = "partial"
+    notes: str = Field(default="", max_length=2000)
