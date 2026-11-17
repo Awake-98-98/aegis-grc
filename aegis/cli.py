@@ -22,11 +22,15 @@ from aegis.models import (
     Asset,
     AssetThreat,
     Client,
+    Control,
+    ControlFramework,
     Engagement,
     RiskAppetite,
     RiskAssessment,
+    RiskControlLink,
     RiskItem,
     Session as LoginSession,
+    SoAEntry,
     Stakeholder,
     Threat,
     User,
@@ -35,6 +39,7 @@ from aegis.services.asset_import import AssetImportService, csv_template
 from aegis.services.assets import AssetService
 from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
+from aegis.services.controls import ControlService, RiskControlService, SoAService
 from aegis.services.engagements import EngagementService
 from aegis.services.risks import RiskAssessmentService, RiskService
 from aegis.services.stakeholders import StakeholderService
@@ -88,6 +93,30 @@ def _build_parser() -> argparse.ArgumentParser:
     risks_export.add_argument("--engagement", required=True)
     risks_export.add_argument("--assessment", required=True, help="assessment code, e.g. RA-0001")
     risks_export.add_argument("--out", type=Path, default=None)
+
+    controls = sub.add_parser("controls", help="control catalog utilities")
+    controls_sub = controls.add_subparsers(dest="controls_command", required=True)
+    controls_sub.add_parser("frameworks", help="list control frameworks and counts")
+    controls_list = controls_sub.add_parser("list", help="list controls of one framework")
+    controls_list.add_argument("--framework", required=True, help="framework code, e.g. ISO27001")
+    controls_list.add_argument("--domain", default="", help="optional domain code, e.g. A.8")
+    controls_coverage = controls_sub.add_parser(
+        "coverage", help="risk coverage of one assessment"
+    )
+    controls_coverage.add_argument("--engagement", required=True)
+    controls_coverage.add_argument(
+        "--assessment", default=None, help="defaults to the latest issued batch"
+    )
+
+    soa = sub.add_parser("soa", help="statement of applicability utilities")
+    soa_sub = soa.add_subparsers(dest="soa_command", required=True)
+    soa_generate = soa_sub.add_parser("generate", help="create missing SoA entries")
+    soa_generate.add_argument("--engagement", required=True)
+    soa_generate.add_argument("--framework", required=True)
+    soa_export = soa_sub.add_parser("export", help="export one SoA as CSV")
+    soa_export.add_argument("--engagement", required=True)
+    soa_export.add_argument("--framework", required=True)
+    soa_export.add_argument("--out", type=Path, default=None)
     return parser
 
 
@@ -232,6 +261,24 @@ def cmd_status(settings: Settings) -> int:
             ),
             "risk_appetite": int(
                 db.execute(select(func.count(RiskAppetite.id)).select_from(RiskAppetite)).scalar()
+                or 0
+            ),
+            "frameworks": int(
+                db.execute(
+                    select(func.count(ControlFramework.id)).select_from(ControlFramework)
+                ).scalar()
+                or 0
+            ),
+            "controls": int(
+                db.execute(select(func.count(Control.id)).select_from(Control)).scalar() or 0
+            ),
+            "soa_entries": int(
+                db.execute(select(func.count(SoAEntry.id)).select_from(SoAEntry)).scalar() or 0
+            ),
+            "risk_controls": int(
+                db.execute(
+                    select(func.count(RiskControlLink.id)).select_from(RiskControlLink)
+                ).scalar()
                 or 0
             ),
         }
@@ -563,11 +610,88 @@ def cmd_seed_demo(args, settings: Settings) -> int:
                 rationale=rationale,
             )
 
+        iso = db.execute(
+            select(ControlFramework).where(ControlFramework.code == "ISO27001")
+        ).scalar_one()
+        mlps = db.execute(
+            select(ControlFramework).where(ControlFramework.code == "MLPS")
+        ).scalar_one()
+        soa = SoAService(db)
+        soa.generate(ctx, e1.id, iso.id)
+        entries = {control.code: entry for entry, control in soa.entries(ctx, e1.id, iso.id)}
+        for code, reason, owner in (
+            ("A.5.1", "信息安全方针已经管理层批准发布，每年评审一次。", "王海"),
+            ("A.5.2", "已在岗位说明书中明确信息安全职责，覆盖到部门负责人。", "周敏"),
+            ("A.5.7", "订阅行业威胁情报，每月形成简报。", "王海"),
+            ("A.8.13", "核心数据库每日全量备份，离线副本已上线。", "孙鹏"),
+            ("A.8.15", "生产系统日志集中采集，保留 180 天。", "孙鹏"),
+            ("A.8.24", "传输与存储使用国密算法，密钥由专人保管。", "孙鹏"),
+        ):
+            soa.update(
+                ctx,
+                entries[code].id,
+                implementation_status="implemented",
+                justification=reason,
+                owner=owner,
+            )
+        for code, reason, owner in (
+            ("A.8.2", "堡垒机多因素认证已覆盖大部分账号，剩余本地账号待迁移。", "孙鹏"),
+            ("A.8.8", "漏洞扫描每季度执行，修复时限尚未纳入考核。", "王海"),
+            ("A.5.24", "事件管理流程已起草，尚未完成桌面演练。", "王海"),
+            ("A.7.11", "UPS 电池组更换完成，带载测试按季度执行。", "孙鹏"),
+        ):
+            soa.update(
+                ctx,
+                entries[code].id,
+                implementation_status="in_progress",
+                justification=reason,
+                owner=owner,
+            )
+        soa.update(
+            ctx,
+            entries["A.7.4"].id,
+            applicable=False,
+            implementation_status="not_started",
+            justification="总部机房为租赁机柜，物理监控由机房服务商承担并在合同中约定。",
+        )
+        soa.generate(ctx, e2.id, mlps.id)
+
+        first_items = {
+            (item.asset_name, item.threat_name): item
+            for item in db.execute(
+                select(RiskItem).where(RiskItem.assessment_id == first.id)
+            ).scalars()
+        }
+        links = RiskControlService(db)
+        links.link(
+            ctx,
+            first_items[("生产执行系统 MES", "勒索软件加密生产数据")].id,
+            control_id=entries["A.8.13"].control_id,
+            coverage="full",
+            notes="离线备份与恢复演练直接降低加密后的数据丢失。",
+        )
+        links.link(
+            ctx,
+            first_items[("生产执行系统 MES", "勒索软件加密生产数据")].id,
+            control_id=entries["A.8.22"].control_id,
+            coverage="partial",
+            notes="生产网已分区，办公终端到 MES 的访问仍在收敛。",
+        )
+        links.link(
+            ctx,
+            first_items[("运维堡垒机", "钓鱼邮件窃取运维凭据")].id,
+            control_id=entries["A.8.2"].control_id,
+            coverage="full",
+            notes="特权账号统一经堡垒机接入并强制多因素认证。",
+        )
         print("demo data loaded:")
         print(f"  clients:     {north.code}, {bank.code}, {clinic.code}")
         print(f"  engagements: {e1.code}, {e2.code}, {e3.code}")
         print(f"  assets:      {e1.code} 下有 5 项资产、4 类威胁、5 条关联")
         print(f"  risks:       {e1.code} 下有 2 个评估批次（1 已签发、1 草稿）")
+        print(f"  controls:    ISO 27001 93 项、NIST CSF 22 项、等保 2.0 70 项")
+        print(f"  soa:         {e1.code} ISO 27001、{e2.code} 等保 2.0")
+        print(f"  coverage:    {first.code} 已覆盖 2/5，保留 3 项未覆盖风险")
         if created_admin:
             print(f"  demo admin:  {demo_email} / {demo_password}")
     engine.dispose()
@@ -735,6 +859,148 @@ def cmd_risks(args, settings: Settings) -> int:
         engine.dispose()
 
 
+def cmd_controls(args, settings: Settings) -> int:
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            service = ControlService(db)
+            if args.controls_command == "frameworks":
+                rows = service.frameworks(ctx)
+                counts = service.framework_counts([row.id for row in rows])
+                print(f"{'code':<12}{'version':<9}{'controls':<10}name")
+                for row in rows:
+                    print(
+                        f"{row.code:<12}{row.version:<9}{counts.get(row.id, 0):<10}{row.name}"
+                    )
+                return 0
+
+            if args.controls_command == "list":
+                framework = service.framework_by_code(ctx, args.framework)
+                rows = service.all_controls(ctx, framework.id)
+                if args.domain:
+                    rows = [row for row in rows if row.domain == args.domain]
+                if not rows:
+                    print(f"no controls for {framework.code} {args.domain}".strip())
+                    return 0
+                print(f"{'code':<10}{'domain':<8}title")
+                for row in rows:
+                    print(f"{row.code:<10}{row.domain:<8}{row.title}")
+                return 0
+
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+            risk_service = RiskControlService(db)
+            assessment = None
+            if args.assessment:
+                assessment = db.execute(
+                    select(RiskAssessment).where(
+                        RiskAssessment.engagement_id == engagement.id,
+                        RiskAssessment.code == args.assessment,
+                    )
+                ).scalar_one_or_none()
+                if assessment is None:
+                    print(
+                        f"error: assessment not found: {args.assessment}",
+                        file=sys.stderr,
+                    )
+                    return 2
+            else:
+                assessment = risk_service.default_assessment(ctx, engagement.id)
+            if assessment is None:
+                print(f"no assessments for {engagement.code}")
+                return 0
+
+            result = risk_service.coverage(ctx, assessment.id)
+            summary = result["summary"]
+            print(f"assessment: {assessment.code} {assessment.title}")
+            print(
+                f"risk coverage: {summary['covered']}/{summary['total']} "
+                f"({summary['coverage_pct']}%)  links={summary['links']}"
+            )
+            by_framework = summary["by_framework"]
+            if by_framework:
+                parts = [f"{code}={count}" for code, count in sorted(by_framework.items())]
+                print("covered by framework: " + ", ".join(parts))
+            uncovered = [row for row in result["rows"] if not row["covered"]]
+            if uncovered:
+                print(f"uncovered: {len(uncovered)}")
+                for row in uncovered:
+                    item = row["item"]
+                    print(
+                        f"  {item.asset_code} {item.asset_name} / "
+                        f"{item.threat_code} {item.threat_name} "
+                        f"(residual {item.residual_score})"
+                    )
+            return 0
+    finally:
+        engine.dispose()
+
+
+def cmd_soa(args, settings: Settings) -> int:
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+            framework = ControlService(db).framework_by_code(ctx, args.framework)
+            service = SoAService(db)
+            if args.soa_command == "generate":
+                result = service.generate(ctx, engagement.id, framework.id)
+                print(
+                    f"generated {result['created']} entries, "
+                    f"skipped {result['skipped']} of {result['total']}"
+                )
+                return 0
+
+            rows = service.export_rows(ctx, engagement.id, framework.id)
+            if not rows:
+                print(
+                    f"no statement of applicability for {engagement.code} "
+                    f"{framework.code}"
+                )
+                return 0
+            lines = [
+                "control_code,control_title,domain,domain_label,applicable,"
+                "implementation_status,owner,justification,notes"
+            ]
+            for row in rows:
+                lines.append(
+                    ",".join(
+                        _csv_cell(row[key])
+                        for key in (
+                            "control_code",
+                            "control_title",
+                            "domain",
+                            "domain_label",
+                            "applicable",
+                            "implementation_status",
+                            "owner",
+                            "justification",
+                            "notes",
+                        )
+                    )
+                )
+            text = "\ufeff" + "\n".join(lines) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+                print(f"exported {len(rows)} entries to {args.out}")
+            else:
+                sys.stdout.write(text)
+            return 0
+    finally:
+        engine.dispose()
+
+
 def _operating_user(db) -> User:
     """CLI actions need an actor; use the oldest active administrator."""
     admin = db.execute(
@@ -764,6 +1030,8 @@ COMMANDS = {
     "prune-sessions": cmd_prune_sessions,
     "assets": cmd_assets,
     "risks": cmd_risks,
+    "controls": cmd_controls,
+    "soa": cmd_soa,
 }
 
 
