@@ -42,6 +42,10 @@ def test_expected_tables_exist(engine) -> None:
         "stakeholders",
         "audit_events",
         "schema_migrations",
+        "control_frameworks",
+        "controls",
+        "soa_entries",
+        "risk_control_links",
     } <= names
 
 

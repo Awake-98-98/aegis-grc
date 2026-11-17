@@ -190,6 +190,95 @@ def test_risks_list_and_export(tmp_path: Path, capsys) -> None:
     assert "mitigate" in exported
 
 
+def test_controls_catalog_and_coverage(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    capsys.readouterr()
+
+    assert main(["--home", home, "controls", "frameworks"]) == 0
+    frameworks = capsys.readouterr().out
+    assert "ISO27001" in frameworks
+    assert "NISTCSF" in frameworks
+    assert "93" in frameworks
+
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "controls",
+                "list",
+                "--framework",
+                "NISTCSF",
+                "--domain",
+                "PR",
+            ]
+        )
+        == 0
+    )
+    listed = capsys.readouterr().out
+    assert "PR.AA" in listed
+    assert "PR.IR" in listed
+    assert "GV.OC" not in listed
+
+    assert (
+        main(["--home", home, "controls", "coverage", "--engagement", "ENG-2026-0001"])
+        == 0
+    )
+    coverage = capsys.readouterr().out
+    assert "2/5 (40.0%)" in coverage
+    assert "uncovered: 3" in coverage
+
+
+def test_soa_generate_and_export(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "soa",
+                "generate",
+                "--engagement",
+                "ENG-2026-0001",
+                "--framework",
+                "ISO27001",
+            ]
+        )
+        == 0
+    )
+    assert "generated 0 entries" in capsys.readouterr().out
+
+    out_path = tmp_path / "soa.csv"
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "soa",
+                "export",
+                "--engagement",
+                "ENG-2026-0001",
+                "--framework",
+                "ISO27001",
+                "--out",
+                str(out_path),
+            ]
+        )
+        == 0
+    )
+    exported = out_path.read_text(encoding="utf-8").lstrip("\ufeff")
+    assert exported.startswith("control_code,control_title,domain")
+    assert "A.8.13" in exported
+    assert "已实施" in exported
+    assert "租赁机柜" in exported
+
+
 def test_risks_export_unknown_assessment(tmp_path: Path, capsys) -> None:
     home = str(tmp_path)
     main(["--home", home, "init"])

@@ -183,6 +183,115 @@ def test_consultant_can_create_assessment(
     assert response.json()["data"]["code"] == "RA-0001"
 
 
+def test_viewer_can_read_controls_but_not_write_them(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "控制权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "控制权限项目"},
+        headers=admin,
+    ).json()["data"]
+    iso = next(
+        row
+        for row in client.get("/api/frameworks", headers=admin).json()["data"]
+        if row["code"] == "ISO27001"
+    )
+    client.post(
+        f"/api/engagements/{engagement['id']}/soa/generate",
+        json={"framework_id": iso["id"]},
+        headers=admin,
+    )
+
+    _add_member(client, bootstrap_admin["csrf_token"], "viewer4@aegis.test", "viewer")
+    token = _token_for(client, "viewer4@aegis.test")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.get("/api/frameworks", headers=headers).status_code == 200
+    listing = client.get(
+        f"/api/engagements/{engagement['id']}/soa",
+        params={"framework_id": iso["id"]},
+        headers=headers,
+    )
+    assert listing.status_code == 200
+    assert listing.json()["meta"]["total"] == 93
+
+    denied = client.post(
+        f"/api/engagements/{engagement['id']}/soa/generate",
+        json={"framework_id": iso["id"]},
+        headers=headers,
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "AEG-3002"
+
+
+def test_consultant_can_generate_soa_and_link_control(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "顾问控制客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "顾问控制项目"},
+        headers=admin,
+    ).json()["data"]
+    asset = client.post(
+        f"/api/engagements/{engagement['id']}/assets",
+        json={"name": "顾问资产"},
+        headers=admin,
+    ).json()["data"]
+    threat = client.post(
+        f"/api/engagements/{engagement['id']}/threats",
+        json={"name": "顾问威胁"},
+        headers=admin,
+    ).json()["data"]
+    link = client.post(
+        f"/api/assets/{asset['id']}/threats",
+        json={"threat_id": threat["id"]},
+        headers=admin,
+    ).json()["data"]
+    assessment = client.post(
+        f"/api/engagements/{engagement['id']}/assessments",
+        json={"title": "顾问评估"},
+        headers=admin,
+    ).json()["data"]
+    risk = client.post(
+        f"/api/assessments/{assessment['id']}/risks",
+        json={"asset_threat_id": link["id"], "likelihood": 3, "impact": 4},
+        headers=admin,
+    ).json()["data"]
+    iso = next(
+        row
+        for row in client.get("/api/frameworks", headers=admin).json()["data"]
+        if row["code"] == "ISO27001"
+    )
+    control = client.get(
+        f"/api/frameworks/{iso['id']}/controls",
+        params={"q": "A.8.13"},
+        headers=admin,
+    ).json()["data"][0]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "consultant4@aegis.test", "consultant")
+    token = _token_for(client, "consultant4@aegis.test")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    generated = client.post(
+        f"/api/engagements/{engagement['id']}/soa/generate",
+        json={"framework_id": iso["id"]},
+        headers=headers,
+    )
+    assert generated.status_code == 200, generated.text
+    linked = client.post(
+        f"/api/risks/{risk['id']}/controls",
+        json={"control_id": control["id"], "coverage": "full"},
+        headers=headers,
+    )
+    assert linked.status_code == 201, linked.text
+
+
 def test_consultant_can_import_assets(client: TestClient, bootstrap_admin: dict) -> None:
     admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
     client.post("/api/clients", json={"name": "导入权限客户"}, headers=admin)
