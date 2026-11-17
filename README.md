@@ -11,11 +11,11 @@ AegisGRC 面向独立安全顾问与小团队咨询方：不需要云服务、�
 | M1 | 平台基座：数据库迁移、认证与 RBAC、审计、客户/项目/干系人、Web 控制台、CLI | 已完成 |
 | M2 | 资产与威胁面：资产清单、CIA 分级、威胁目录、资产威胁配对、CSV 导入导出 | 已完成 |
 | M3 | 风险评估：可能性与影响矩阵、固有/剩余风险、处置策略 | 已完成 |
-| M4 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 规划中 |
+| M4 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 已完成 |
 | M5 | 访谈、证据与整改：访谈记录、证据附件、整改任务 | 规划中 |
 | M6 | 报告与运营：报告生成、备份恢复、指标看板、加固与发布 | 规划中 |
 
-每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，M3 交付评估批次与风险登记册，控制库与证据留给 M4、M5。
+每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，M3 交付评估批次与风险登记册，M4 交付控制库、适用性声明与风险覆盖，证据与整改留给 M5。
 
 ## 快速开始
 
@@ -57,6 +57,12 @@ aegis assets export --engagement ENG-2026-0001 --out exported.csv
 
 aegis risks list --engagement ENG-2026-0001
 aegis risks export --engagement ENG-2026-0001 --assessment RA-0001 --out register.csv
+
+aegis controls frameworks
+aegis controls list --framework ISO27001 --domain A.8
+aegis controls coverage --engagement ENG-2026-0001 --assessment RA-0001
+aegis soa generate --engagement ENG-2026-0001 --framework ISO27001
+aegis soa export --engagement ENG-2026-0001 --framework ISO27001 --out soa.csv
 ```
 
 ## 配置
@@ -78,7 +84,7 @@ aegis risks export --engagement ENG-2026-0001 --assessment RA-0001 --out registe
 | 角色 | 权限 |
 |---|---|
 | `admin` | `*`，含用户管理与全部写操作 |
-| `consultant` | 客户/项目/干系人/资产/威胁/风险读写，审计只读 |
+| `consultant` | 客户/项目/干系人/资产/威胁/风险/控制读写，审计只读 |
 | `viewer` | 全部只读 |
 
 权限在服务层统一判定（`aegis/security/rbac.py`），Web 与 REST 共用同一套规则，避免两处实现漂移。
@@ -131,6 +137,17 @@ aegis risks export --engagement ENG-2026-0001 --assessment RA-0001 --out registe
 | GET | `/api/assessments/{id}/compare/{baseline_id}` | 与基线批次逐项对比 |
 | GET/POST | `/api/assessments/{id}/risks` | 风险项列表 / 新增评分 |
 | GET/PATCH/DELETE | `/api/risks/{id}` | 风险项详情 / 更新 / 删除 |
+| GET | `/api/frameworks` | 控制框架列表与条目数 |
+| GET | `/api/frameworks/{id}` | 框架详情与安全域统计 |
+| GET | `/api/frameworks/{id}/controls` | 控制项列表（搜索、安全域、分页） |
+| GET | `/api/controls/{id}` | 控制项详情 |
+| GET | `/api/engagements/{id}/soa` | 项目适用性声明（按框架） |
+| GET | `/api/engagements/{id}/soa/summary` | SoA 覆盖率汇总 |
+| POST | `/api/engagements/{id}/soa/generate` | 补齐缺失的 SoA 条目 |
+| PATCH | `/api/soa/{id}` | 更新适用性、实施状态、理由、责任人 |
+| GET | `/api/assessments/{id}/coverage` | 风险控制覆盖与未覆盖清单 |
+| GET/POST | `/api/risks/{id}/controls` | 风险项已挂控制 / 建立映射 |
+| DELETE | `/api/risk-controls/{id}` | 解除映射 |
 | GET | `/api/audit` | 审计事件查询（实体、动作、操作人、分页） |
 | GET | `/api/dashboard/summary` | 看板聚合数据 |
 
@@ -192,30 +209,56 @@ CSV 导入接受英文或中文表头，中文取值（如"业务资产""在用"
 
 风险项保存资产与威胁的编号、名称快照，关联外键为 `SET NULL`。资产或威胁被删除后，已签发的登记册仍然可读。
 
+## 控制库与合规映射
+
+内置三套控制框架，迁移时写入，界面只读：
+
+| 框架 | 代码 | 条目 |
+|---|---|---|
+| ISO/IEC 27001:2022 附录 A | `ISO27001` | 93 |
+| NIST CSF 2.0 | `NISTCSF` | 22 |
+| 等保 2.0 安全通用要求 | `MLPS` | 70 |
+
+NIST 取六个功能下的类别，不展开 106 条子类；等保按 10 个安全域归纳控制点。ISO 与 NIST 保留英文原题。
+
+### 适用性声明
+
+项目按框架生成 SoA，每个控制项记录是否适用、实施状态（未开始/进行中/已实施）、理由与责任人。生成只补缺失条目，重复执行不会覆盖已有判断。
+
+排除控制项必须填写理由，且不能标为已实施，否则返回 422 `AEG-2003`。框架覆盖率 = 已实施适用项 / 适用项，不适用项不计入分母。
+
+### 风险控制映射
+
+控制项挂到评分项上，覆盖程度分完全覆盖、部分覆盖、计划覆盖。映射随评估批次走，新批次不自动继承，避免新版风险凭空显示已覆盖。
+
+批次覆盖接口返回逐条风险的控制映射、按框架的覆盖计数与未覆盖清单。风险覆盖率 = 至少一条映射的评分项 / 批次评分项总数。
+
+Web 控制台在"控制库"浏览目录，项目详情进入"适用性声明"，评估详情进入"控制覆盖"。
+
 ## 项目结构
 
 ```
 aegis/
   api/            REST 路由、依赖注入、统一响应
-  db/             引擎、自研迁移器、m0001 至 m0003
+  db/             引擎、自研迁移器、m0001 至 m0004
   models/         SQLAlchemy 模型
   risk/           5×5 矩阵常量与分档函数
   services/       业务规则与权限校验的唯一入口
   security/       口令哈希、令牌、RBAC、输入校验
   web/            Jinja2 服务端渲染路由
-  templates/      21 个页面模板
+  templates/      24 个页面模板
   static/         原生 CSS/JS，无构建链
   config.py       环境配置与启动校验
   errors.py       统一错误码
   cli.py          运维命令
-tests/            131 个用例，覆盖配置、迁移、安全、API、Web、CLI
+tests/            148 个用例，覆盖配置、迁移、安全、API、Web、CLI
 docs/design/      设计取舍记录
 ```
 
 ## 测试
 
 ```bash
-pytest            # 131 passed
+pytest            # 148 passed
 ```
 
 测试使用内存 SQLite 与 `TestClient`，不依赖网络与外部服务，可在 CI 中直接运行。
@@ -227,6 +270,7 @@ pytest            # 131 passed
 - [m1-foundation.md](docs/design/m1-foundation.md)：自研迁移器、单进程限流、Bearer 优先、审计同事务写入
 - [m2-assets.md](docs/design/m2-assets.md)：资产挂项目、派生分不落库、导入部分成功
 - [m3-risks.md](docs/design/m3-risks.md)：批次冻结、快照匹配、单一偏好阈值
+- [m4-controls.md](docs/design/m4-controls.md)：全局目录、惰性 SoA、排除理由、映射随批次、两个覆盖率口径
 
 ## 许可
 
