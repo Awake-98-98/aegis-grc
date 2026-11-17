@@ -21,6 +21,7 @@
       <a class="nav-item {{ 'active' if nav == 'dashboard' else '' }}" href="/">工作台</a>
       <a class="nav-item {{ 'active' if nav == 'clients' else '' }}" href="/clients">客户台账</a>
       <a class="nav-item {{ 'active' if nav == 'engagements' else '' }}" href="/engagements">咨询项目</a>
+      <a class="nav-item {{ 'active' if nav == 'controls' else '' }}" href="/controls">控制库</a>
       <a class="nav-item {{ 'active' if nav == 'audit' else '' }}" href="/audit">审计轨迹</a>
       {% if current_user.role == 'admin' %}
       <a class="nav-item {{ 'active' if nav == 'users' else '' }}" href="/users">成员与角色</a>

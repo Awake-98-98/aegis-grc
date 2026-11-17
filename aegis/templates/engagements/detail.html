@@ -16,6 +16,9 @@
   {% if can(current_user.role, 'risk:read') %}
   <a class="button" href="/engagements/{{ engagement.id }}/assessments">风险评估{% if assessment_count %} · {{ assessment_count }}{% endif %}</a>
   {% endif %}
+  {% if can(current_user.role, 'control:read') %}
+  <a class="button" href="/engagements/{{ engagement.id }}/soa">适用性声明</a>
+  {% endif %}
   <a class="button" href="/clients/{{ engagement.client_id }}">查看客户</a>
 </div>
 

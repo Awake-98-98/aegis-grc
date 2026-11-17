@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from aegis.api.responses import clear_session_cookie, set_session_cookie
 from aegis.config import Settings
 from aegis.errors import CsrfFailure, Unauthorized, ValidationFailure
-from aegis.models import AssetThreat, User
+from aegis.models import AssetThreat, RiskControlLink, RiskItem, User
 from aegis.security.tokens import csrf_matches
 from aegis.security.validation import (
     ASSET_CATEGORIES,
@@ -44,6 +44,16 @@ from aegis.services.asset_import import AssetImportService
 from aegis.services.assets import CRITICALITY_LABELS, AssetService
 from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
+from aegis.services.controls import (
+    COVERAGE_LABELS,
+    COVERAGE_LEVELS,
+    FRAMEWORK_KIND_LABELS,
+    IMPLEMENTATION_LABELS,
+    IMPLEMENTATION_STATUSES,
+    ControlService,
+    RiskControlService,
+    SoAService,
+)
 from aegis.services.dashboard import DashboardService
 from aegis.services.engagements import ALLOWED_TRANSITIONS, EngagementService
 from aegis.services.risks import (
@@ -1216,6 +1226,258 @@ def assessment_compare_page(
         severity_labels=SEVERITY_LABELS,
         treatment_labels=TREATMENT_LABELS,
     )
+
+
+# ------------------------------------------------------------------------ controls
+@router.get("/controls", response_class=HTMLResponse)
+def controls_page(
+    request: Request,
+    framework_id: str = "",
+    q: str = "",
+    domain: str = "",
+    page: int = 1,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = ControlService(db)
+    frameworks = service.frameworks(ctx)
+    if not frameworks:
+        raise ValidationFailure("control catalog is empty")
+    selected = frameworks[0]
+    for framework in frameworks:
+        if framework.id == framework_id:
+            selected = framework
+    counts = service.framework_counts([row.id for row in frameworks])
+    rows, total, page, page_size = service.controls(
+        ctx,
+        selected.id,
+        q=q,
+        domain=domain,
+        page=page,
+        page_size=40,
+    )
+    pages = (total + page_size - 1) // page_size if total else 1
+    return _render(
+        request,
+        "controls/list.html",
+        ctx,
+        nav="controls",
+        frameworks=frameworks,
+        framework=selected,
+        counts=counts,
+        controls=rows,
+        domains=service.domains(ctx, selected.id),
+        kinds=FRAMEWORK_KIND_LABELS,
+        total=total,
+        page=page,
+        pages=pages,
+        q=q,
+        domain=domain,
+    )
+
+
+@router.get("/engagements/{engagement_id}/soa", response_class=HTMLResponse)
+def soa_page(
+    engagement_id: str,
+    request: Request,
+    framework_id: str = "",
+    q: str = "",
+    domain: str = "",
+    status: str = "",
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    engagement = EngagementService(db).get_for(ctx, engagement_id)
+    catalog = ControlService(db)
+    frameworks = catalog.frameworks(ctx)
+    if not frameworks:
+        raise ValidationFailure("control catalog is empty")
+    selected = frameworks[0]
+    for framework in frameworks:
+        if framework.id == framework_id:
+            selected = framework
+    service = SoAService(db)
+    entries = service.entries(
+        ctx,
+        engagement.id,
+        selected.id,
+        q=q,
+        domain=domain,
+        status=status,
+    )
+    return _render(
+        request,
+        "controls/soa.html",
+        ctx,
+        nav="engagements",
+        engagement=engagement,
+        frameworks=frameworks,
+        framework=selected,
+        entries=entries,
+        summary=service.summary(ctx, engagement.id, selected.id),
+        domains=catalog.domains(ctx, selected.id),
+        statuses=IMPLEMENTATION_STATUSES,
+        implementation_labels=IMPLEMENTATION_LABELS,
+        kinds=FRAMEWORK_KIND_LABELS,
+        q=q,
+        domain=domain,
+        status=status,
+    )
+
+
+@router.post("/engagements/{engagement_id}/soa/generate", response_class=HTMLResponse)
+async def soa_generate_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    framework_id = form.get("framework_id", "")
+    SoAService(db).generate(
+        ctx,
+        engagement_id,
+        framework_id,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/engagements/{engagement_id}/soa?framework_id={framework_id}")
+
+
+@router.post("/soa/{entry_id}/edit", response_class=HTMLResponse)
+async def soa_edit_submit(
+    entry_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    service = SoAService(db)
+    entry = service.entry(ctx, entry_id)
+    engagement_id = entry.engagement_id
+    framework_id = entry.control.framework_id
+    service.update(
+        ctx,
+        entry_id,
+        applicable=form.get("applicable") == "on",
+        implementation_status=form.get("implementation_status", "not_started"),
+        justification=form.get("justification", ""),
+        owner=form.get("owner", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/engagements/{engagement_id}/soa?framework_id={framework_id}")
+
+
+@router.get("/assessments/{assessment_id}/coverage", response_class=HTMLResponse)
+def assessment_coverage_page(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    result = RiskControlService(db).coverage(ctx, assessment_id)
+    assessment = result["assessment"]
+    engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
+    catalog = ControlService(db)
+    control_groups = [
+        (framework, catalog.all_controls(ctx, framework.id))
+        for framework in catalog.frameworks(ctx)
+    ]
+    return _render(
+        request,
+        "assessments/coverage.html",
+        ctx,
+        nav="engagements",
+        assessment=assessment,
+        engagement=engagement,
+        rows=result["rows"],
+        summary=result["summary"],
+        control_groups=control_groups,
+        assessment_status_labels=ASSESSMENT_STATUS_LABELS,
+        coverage_labels=COVERAGE_LABELS,
+        coverage_levels=COVERAGE_LEVELS,
+        severity_labels=SEVERITY_LABELS,
+        treatment_labels=TREATMENT_LABELS,
+    )
+
+
+@router.post("/risks/{risk_id}/controls", response_class=HTMLResponse)
+async def risk_control_link_submit(
+    risk_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    item = RiskService(db).get_for(ctx, risk_id)
+    RiskControlService(db).link(
+        ctx,
+        risk_id,
+        control_id=form.get("control_id", ""),
+        coverage=form.get("coverage", "partial"),
+        notes=form.get("notes", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assessments/{item.assessment_id}/coverage")
+
+
+@router.post("/assessments/{assessment_id}/controls", response_class=HTMLResponse)
+async def assessment_control_link_submit(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    RiskControlService(db).link(
+        ctx,
+        form.get("risk_id", ""),
+        control_id=form.get("control_id", ""),
+        coverage=form.get("coverage", "partial"),
+        notes=form.get("notes", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/assessments/{assessment_id}/coverage")
+
+
+@router.post("/risk-controls/{link_id}/delete", response_class=HTMLResponse)
+async def risk_control_unlink_submit(
+    link_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    link = db.get(RiskControlLink, link_id)
+    assessment_id = ""
+    if link is not None:
+        item = db.get(RiskItem, link.risk_item_id)
+        assessment_id = item.assessment_id if item else ""
+    RiskControlService(db).unlink(ctx, link_id, ip=ip, user_agent=user_agent)
+    if assessment_id:
+        return _redirect(f"/assessments/{assessment_id}/coverage")
+    return _redirect("/engagements")
 
 
 # ---------------------------------------------------------------------------- audit

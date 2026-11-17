@@ -12,6 +12,9 @@
   <a class="button primary" href="/assessments/{{ assessment.id }}/risks/new">新增评分</a>
   {% endif %}
   <a class="button" href="/assessments/{{ assessment.id }}/compare">版本对比</a>
+  {% if can(current_user.role, 'control:read') %}
+  <a class="button" href="/assessments/{{ assessment.id }}/coverage">控制覆盖</a>
+  {% endif %}
 </div>
 
 <div class="stat-grid">

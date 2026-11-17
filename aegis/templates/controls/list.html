@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}控制库{% endblock %}
+{% block eyebrow %}控制库与合规映射{% endblock %}
+{% block heading %}控制库{% endblock %}
+{% block content %}
+<div class="toolbar">
+  {% for item in frameworks %}
+  <a class="button {{ 'primary' if item.id == framework.id else '' }}" href="/controls?framework_id={{ item.id }}">
+    {{ item.code }} · {{ counts.get(item.id, 0) }}
+  </a>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>{{ framework.name }}</h3>
+    <span class="badge">{{ kinds.get(framework.kind, framework.kind) }}</span>
+  </div>
+  <dl class="facts">
+    <dt>版本</dt><dd>{{ framework.version or '-' }}</dd>
+    <dt>发布机构</dt><dd>{{ framework.publisher or '-' }}</dd>
+    <dt>控制项</dt><dd>{{ counts.get(framework.id, 0) }} 项</dd>
+  </dl>
+  <p class="notes">{{ framework.description }}</p>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>控制项清单</h3>
+    <span class="muted small">共 {{ total }} 项</span>
+  </div>
+  <form method="get" action="/controls" class="inline-form">
+    <input type="hidden" name="framework_id" value="{{ framework.id }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="按编号或标题搜索">
+    <select name="domain">
+      <option value="">全部安全域</option>
+      {% for item in domains %}
+      <option value="{{ item.domain }}" {{ 'selected' if item.domain == domain else '' }}>
+        {{ item.domain }} · {{ item.domain_label }}（{{ item.control_count }}）
+      </option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">筛选</button>
+    {% if q or domain %}<a class="quiet" href="/controls?framework_id={{ framework.id }}">清除</a>{% endif %}
+  </form>
+
+  {% if controls %}
+  <table class="table">
+    <thead>
+      <tr><th>编号</th><th>控制项</th><th>安全域</th></tr>
+    </thead>
+    <tbody>
+    {% for item in controls %}
+      <tr>
+        <td class="mono">{{ item.code }}</td>
+        <td>
+          {{ item.title }}
+          {% if item.title_en %}<br><span class="muted small">{{ item.title_en }}</span>{% endif %}
+        </td>
+        <td>{{ item.domain }} · {{ item.domain_label }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}
+    <a class="button" href="/controls?framework_id={{ framework.id }}&q={{ q }}&domain={{ domain }}&page={{ page - 1 }}">上一页</a>
+    {% endif %}
+    <span class="muted small">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}
+    <a class="button" href="/controls?framework_id={{ framework.id }}&q={{ q }}&domain={{ domain }}&page={{ page + 1 }}">下一页</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="empty">没有符合条件的控制项。</p>
+  {% endif %}
+</section>
+{% endblock %}

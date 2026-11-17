@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ assessment.code }} · 控制覆盖{% endblock %}
+{% block eyebrow %}合规映射 · {{ engagement.code }}{% endblock %}
+{% block heading %}控制覆盖{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/assessments/{{ assessment.id }}">← 返回评估批次</a>
+  <span class="mono small">{{ assessment.code }}</span>
+  <span class="badge badge-{{ assessment.status }}">{{ assessment_status_labels.get(assessment.status, assessment.status) }}</span>
+  <span class="spacer"></span>
+  {% if can(current_user.role, 'control:read') %}
+  <a class="button" href="/engagements/{{ engagement.id }}/soa">适用性声明</a>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">风险项</span>
+    <strong class="stat-value">{{ summary.total }}</strong>
+    <small>当前批次的评分项</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">已覆盖</span>
+    <strong class="stat-value">{{ summary.covered }}</strong>
+    <small>至少挂接一条控制</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">未覆盖</span>
+    <strong class="stat-value">{{ summary.uncovered }}</strong>
+    <small>尚无控制承接</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">风险覆盖率</span>
+    <strong class="stat-value">{{ summary.coverage_pct }}%</strong>
+    <small>映射 {{ summary.links }} 条</small>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>风险控制映射</h3>
+    <span class="muted small">按残余分值排序</span>
+  </div>
+  {% if rows %}
+  <table class="table">
+    <thead>
+      <tr><th>资产</th><th>威胁</th><th>残余</th><th>已挂控制</th><th>覆盖框架</th></tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><span class="mono small">{{ row.item.asset_code }}</span><br>{{ row.item.asset_name }}</td>
+        <td><span class="mono small">{{ row.item.threat_code }}</span><br>{{ row.item.threat_name }}</td>
+        <td>
+          <strong>{{ row.item.residual_score }}</strong>
+          <span class="badge badge-{{ row.item.residual_severity }}">{{ severity_labels[row.item.residual_severity] }}</span>
+        </td>
+        <td>
+          {% for link in row.links %}
+          <div class="inline">
+            <span class="badge">{{ link.control.framework.code }}</span>
+            <span class="mono small">{{ link.control.code }}</span>
+            <span>{{ link.control.title }}</span>
+            <span class="muted small">{{ coverage_labels.get(link.coverage, link.coverage) }}</span>
+            {% if can(current_user.role, 'control:write') %}
+            <form method="post" action="/risk-controls/{{ link.id }}/delete" class="inline" data-confirm="确认解除该控制映射？">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="link-button danger" type="submit">解除</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <span class="muted small">未挂接控制</span>
+          {% endfor %}
+        </td>
+        <td class="mono small">{{ row.frameworks | join(', ') if row.frameworks else '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">该批次尚无评分项。</p>
+  {% endif %}
+</section>
+
+{% if summary.uncovered %}
+<section class="card">
+  <div class="card-head">
+    <h3>未覆盖风险</h3>
+    <span class="muted small">{{ summary.uncovered }} 项</span>
+  </div>
+  <ul class="timeline">
+    {% for row in rows if not row.covered %}
+    <li>
+      <span class="dot"></span>
+      <div>
+        <p><span class="mono small">{{ row.item.asset_code }}</span> {{ row.item.asset_name }} / <span class="mono small">{{ row.item.threat_code }}</span> {{ row.item.threat_name }}</p>
+        <small>残余 {{ row.item.residual_score }} · {{ treatment_labels.get(row.item.treatment, row.item.treatment) }}</small>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if can(current_user.role, 'control:write') and rows %}
+<section class="card">
+  <div class="card-head">
+    <h3>挂接控制</h3>
+    <span class="muted small">同一条风险项与同一控制项只能建立一条映射</span>
+  </div>
+  <form method="post" action="/assessments/{{ assessment.id }}/controls" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>风险项
+      <select name="risk_id">
+        {% for row in rows %}
+        <option value="{{ row.item.id }}">{{ row.item.asset_code }} / {{ row.item.threat_code }} · 残余 {{ row.item.residual_score }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>覆盖程度
+      <select name="coverage">
+        {% for item in coverage_levels %}
+        <option value="{{ item }}">{{ coverage_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="span-2">控制项
+      <select name="control_id">
+        {% for framework, controls in control_groups %}
+        <optgroup label="{{ framework.code }} · {{ framework.name }}">
+          {% for control in controls %}
+          <option value="{{ control.id }}">{{ control.code }} · {{ control.title }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="span-2">映射说明
+      <input type="text" name="notes" maxlength="2000" placeholder="控制如何降低该风险，或仍存在的差距">
+    </label>
+    <div class="form-actions span-2">
+      <button class="button primary" type="submit">建立映射</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{{ engagement.code }} · 适用性声明{% endblock %}
+{% block eyebrow %}合规映射 · {{ engagement.code }}{% endblock %}
+{% block heading %}适用性声明{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="quiet" href="/engagements/{{ engagement.id }}">← 返回项目</a>
+  <span class="spacer"></span>
+  {% for item in frameworks %}
+  <a class="button {{ 'primary' if item.id == framework.id else '' }}" href="/engagements/{{ engagement.id }}/soa?framework_id={{ item.id }}">
+    {{ item.code }}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">适用控制项</span>
+    <strong class="stat-value">{{ summary.applicable }}</strong>
+    <small>目录共 {{ summary.total_controls }} 项</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">已实施</span>
+    <strong class="stat-value">{{ summary.implemented }}</strong>
+    <small>进行中 {{ summary.in_progress }} · 未开始 {{ summary.not_started }}</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">框架覆盖率</span>
+    <strong class="stat-value">{{ summary.coverage_pct }}%</strong>
+    <small>已实施 / 适用项</small>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">不适用</span>
+    <strong class="stat-value">{{ summary.excluded }}</strong>
+    <small>缺理由 {{ summary.excluded_without_justification }}</small>
+  </div>
+</div>
+
+{% if summary.generated < summary.total_controls %}
+<section class="card">
+  <div class="card-head">
+    <h3>生成适用性声明</h3>
+    <span class="muted small">已生成 {{ summary.generated }} / {{ summary.total_controls }}</span>
+  </div>
+  <p class="muted small">将为该框架下尚未纳入的控制项补充记录，已有判断不会被覆盖。</p>
+  {% if can(current_user.role, 'control:write') %}
+  <form method="post" action="/engagements/{{ engagement.id }}/soa/generate" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="framework_id" value="{{ framework.id }}">
+    <button class="button primary" type="submit">生成 {{ framework.code }} 条目</button>
+  </form>
+  {% else %}
+  <p class="muted small">当前角色只读，无法生成条目。</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h3>{{ framework.name }}</h3>
+    <span class="muted small">排除控制项必须填写理由</span>
+  </div>
+  <form method="get" action="/engagements/{{ engagement.id }}/soa" class="inline-form">
+    <input type="hidden" name="framework_id" value="{{ framework.id }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="按编号或标题搜索">
+    <select name="domain">
+      <option value="">全部安全域</option>
+      {% for item in domains %}
+      <option value="{{ item.domain }}" {{ 'selected' if item.domain == domain else '' }}>{{ item.domain }} · {{ item.domain_label }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for item in statuses %}
+      <option value="{{ item }}" {{ 'selected' if item == status else '' }}>{{ implementation_labels.get(item, item) }}</option>
+      {% endfor %}
+    </select>
+    <button class="button" type="submit">筛选</button>
+    {% if q or domain or status %}<a class="quiet" href="/engagements/{{ engagement.id }}/soa?framework_id={{ framework.id }}">清除</a>{% endif %}
+  </form>
+
+  {% if entries %}
+  <table class="table compact">
+    <thead>
+      <tr><th>控制项</th><th>适用</th><th>实施状态</th><th>理由</th><th>责任人</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for entry, control in entries %}
+      <tr>
+        <td>
+          <form id="soa-{{ entry.id }}" method="post" action="/soa/{{ entry.id }}/edit">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          </form>
+          <span class="mono small">{{ control.code }}</span><br>
+          {{ control.title }}
+          <br><span class="muted small">{{ control.domain_label }}</span>
+        </td>
+        <td>
+          <input type="checkbox" name="applicable" form="soa-{{ entry.id }}" {{ 'checked' if entry.applicable else '' }} {{ 'disabled' if not can(current_user.role, 'control:write') else '' }}>
+        </td>
+        <td>
+          <select name="implementation_status" form="soa-{{ entry.id }}" {{ 'disabled' if not can(current_user.role, 'control:write') else '' }}>
+            {% for item in statuses %}
+            <option value="{{ item }}" {{ 'selected' if item == entry.implementation_status else '' }}>{{ implementation_labels.get(item, item) }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <input type="text" name="justification" form="soa-{{ entry.id }}" value="{{ entry.justification }}" maxlength="2000" {{ 'readonly' if not can(current_user.role, 'control:write') else '' }}>
+        </td>
+        <td>
+          <input type="text" name="owner" form="soa-{{ entry.id }}" value="{{ entry.owner }}" maxlength="120" {{ 'readonly' if not can(current_user.role, 'control:write') else '' }}>
+        </td>
+        <td class="right">
+          {% if can(current_user.role, 'control:write') %}
+          <button class="button" type="submit" form="soa-{{ entry.id }}">保存</button>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">该框架尚未生成适用性声明。</p>
+  {% endif %}
+</section>
+{% endblock %}
