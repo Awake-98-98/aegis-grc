@@ -976,7 +976,7 @@ def assessment_detail_page(
     engagement = EngagementService(db).get_for(ctx, assessment.engagement_id)
     items = service.items_for(assessment.id)
     appetite = service.appetite(ctx, assessment.engagement_id)
-    threshold = appetite.max_acceptable_score if appetite else 9
+    threshold = appetite.max_acceptable_score if appetite else DEFAULT_APPETITE
     scored = {(item.asset_id, item.threat_id) for item in items}
     pairs = [
         link

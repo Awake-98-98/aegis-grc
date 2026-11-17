@@ -220,7 +220,11 @@ def create_risk(
         ip=ip,
         user_agent=user_agent,
     )
-    return ok(risk_item_public(item))
+    assessments = RiskAssessmentService(db)
+    assessment = assessments.get_for(ctx, item.assessment_id)
+    appetite = assessments.appetite(ctx, assessment.engagement_id)
+    threshold = appetite.max_acceptable_score if appetite else DEFAULT_APPETITE
+    return ok(risk_item_public(item, appetite_threshold=threshold))
 
 
 @router.get("/risks/{risk_id}")
@@ -253,7 +257,11 @@ def update_risk(
         ip=ip,
         user_agent=user_agent,
     )
-    return ok(risk_item_public(item))
+    assessments = RiskAssessmentService(db)
+    assessment = assessments.get_for(ctx, item.assessment_id)
+    appetite = assessments.appetite(ctx, assessment.engagement_id)
+    threshold = appetite.max_acceptable_score if appetite else DEFAULT_APPETITE
+    return ok(risk_item_public(item, appetite_threshold=threshold))
 
 
 @router.delete("/risks/{risk_id}")

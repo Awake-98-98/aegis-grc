@@ -98,6 +98,7 @@ def test_risk_item_scores_and_audit(client: TestClient, admin_headers: dict) -> 
     assert item["residual_severity"] == "medium"
     assert item["reduction"] == 14
     assert item["asset_code"] == "AST-0001"
+    assert item["within_appetite"] is True
 
     audit = client.get(
         "/api/audit", params={"action": "risk.create"}, headers=admin_headers
@@ -271,7 +272,7 @@ def test_appetite_threshold_marks_risks(client: TestClient, admin_headers: dict)
     engagement = _engagement(client, admin_headers)
     assessment = _assessment(client, admin_headers, engagement["id"])
     link = _pair(client, admin_headers, engagement["id"])
-    client.post(
+    item = client.post(
         f"/api/assessments/{assessment['id']}/risks",
         json={
             "asset_threat_id": link["id"],
@@ -281,7 +282,7 @@ def test_appetite_threshold_marks_risks(client: TestClient, admin_headers: dict)
             "residual_impact": 4,
         },
         headers=admin_headers,
-    )
+    ).json()["data"]
 
     appetite = client.put(
         f"/api/engagements/{engagement['id']}/risk-appetite",
@@ -299,6 +300,19 @@ def test_appetite_threshold_marks_risks(client: TestClient, admin_headers: dict)
     assert summary["by_severity"]["high"] == 1
     assert summary["appetite_threshold"] == 10
     assert summary["average_residual"] == 12.0
+
+    client.put(
+        f"/api/engagements/{engagement['id']}/risk-appetite",
+        json={"max_acceptable_score": 5, "statement": "收紧到 5"},
+        headers=admin_headers,
+    )
+    edited = client.patch(
+        f"/api/risks/{item['id']}",
+        json={"rationale": "收紧偏好后复核"},
+        headers=admin_headers,
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["data"]["within_appetite"] is False
 
 
 def test_delete_draft_assessment_cascades(
