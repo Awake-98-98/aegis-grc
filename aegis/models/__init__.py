@@ -6,6 +6,8 @@ from .audit import AuditEvent
 from .client import Client
 from .control import Control, ControlFramework
 from .engagement import Engagement
+from .evidence_file import EvidenceFile
+from .remediation_task import RemediationTask
 from .risk_appetite import RiskAppetite
 from .risk_assessment import RiskAssessment
 from .risk_control import RiskControlLink
@@ -24,6 +26,8 @@ __all__ = [
     "Control",
     "ControlFramework",
     "Engagement",
+    "EvidenceFile",
+    "RemediationTask",
     "RiskAppetite",
     "RiskAssessment",
     "RiskControlLink",

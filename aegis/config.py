@@ -77,6 +77,10 @@ class Settings:
         return self.environment == "production"
 
     @property
+    def evidence_path(self) -> Path:
+        return self.home / "evidence"
+
+    @property
     def database_path(self) -> Path | None:
         prefix = "sqlite+pysqlite:///"
         if self.database_url.startswith(prefix):
