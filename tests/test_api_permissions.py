@@ -292,6 +292,68 @@ def test_consultant_can_generate_soa_and_link_control(
     assert linked.status_code == 201, linked.text
 
 
+def test_viewer_can_read_remediation_but_not_write_it(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "整改权限客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "整改权限项目"},
+        headers=admin,
+    ).json()["data"]
+    task = client.post(
+        f"/api/engagements/{engagement['id']}/remediation-tasks",
+        json={"title": "整改权限任务"},
+        headers=admin,
+    ).json()["data"]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "viewer5@aegis.test", "viewer")
+    token = _token_for(client, "viewer5@aegis.test")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    listing = client.get(
+        f"/api/engagements/{engagement['id']}/remediation-tasks", headers=headers
+    )
+    assert listing.status_code == 200
+    assert listing.json()["meta"]["total"] == 1
+    assert client.get(
+        f"/api/remediation-tasks/{task['id']}/evidence", headers=headers
+    ).status_code == 200
+
+    denied = client.post(
+        f"/api/remediation-tasks/{task['id']}/transition",
+        json={"status": "in_progress"},
+        headers=headers,
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "AEG-3002"
+
+
+def test_consultant_can_create_remediation_task(
+    client: TestClient, bootstrap_admin: dict
+) -> None:
+    admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
+    client.post("/api/clients", json={"name": "顾问整改客户"}, headers=admin)
+    client_row = client.get("/api/clients").json()["data"][0]
+    engagement = client.post(
+        "/api/engagements",
+        json={"client_id": client_row["id"], "name": "顾问整改项目"},
+        headers=admin,
+    ).json()["data"]
+
+    _add_member(client, bootstrap_admin["csrf_token"], "consultant5@aegis.test", "consultant")
+    token = _token_for(client, "consultant5@aegis.test")
+    response = client.post(
+        f"/api/engagements/{engagement['id']}/remediation-tasks",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"title": "顾问建立的整改任务", "priority": "high"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["data"]["code"] == "RT-0001"
+
+
 def test_consultant_can_import_assets(client: TestClient, bootstrap_admin: dict) -> None:
     admin = {"X-CSRF-Token": bootstrap_admin["csrf_token"]}
     client.post("/api/clients", json={"name": "导入权限客户"}, headers=admin)

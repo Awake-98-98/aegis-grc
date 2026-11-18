@@ -46,6 +46,8 @@ def test_expected_tables_exist(engine) -> None:
         "controls",
         "soa_entries",
         "risk_control_links",
+        "remediation_tasks",
+        "evidence_files",
     } <= names
 
 

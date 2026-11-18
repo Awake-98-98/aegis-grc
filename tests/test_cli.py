@@ -279,6 +279,77 @@ def test_soa_generate_and_export(tmp_path: Path, capsys) -> None:
     assert "租赁机柜" in exported
 
 
+def test_remediation_and_evidence_cli(tmp_path: Path, capsys) -> None:
+    home = str(tmp_path)
+    main(["--home", home, "init"])
+    main(["--home", home, "seed-demo"])
+    capsys.readouterr()
+
+    assert (
+        main(["--home", home, "remediation", "list", "--engagement", "ENG-2026-0001"])
+        == 0
+    )
+    listing = capsys.readouterr().out
+    assert "RT-0001" in listing
+    assert "RT-0003" in listing
+    assert "已完成" in listing
+
+    assert (
+        main(
+            ["--home", home, "remediation", "summary", "--engagement", "ENG-2026-0001"]
+        )
+        == 0
+    )
+    summary = capsys.readouterr().out
+    assert "overdue:" in summary
+    assert "completion:" in summary
+
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "evidence",
+                "list",
+                "--engagement",
+                "ENG-2026-0001",
+                "--task",
+                "RT-0001",
+            ]
+        )
+        == 0
+    )
+    evidence = capsys.readouterr().out
+    assert "mes-segmentation-plan.txt" in evidence
+    assert "text/plain" in evidence
+
+    out_dir = tmp_path / "evidence"
+    assert (
+        main(
+            [
+                "--home",
+                home,
+                "evidence",
+                "export",
+                "--engagement",
+                "ENG-2026-0001",
+                "--task",
+                "RT-0001",
+                "--out",
+                str(out_dir),
+            ]
+        )
+        == 0
+    )
+    exported = out_dir / "mes-segmentation-plan.txt"
+    assert "MES 生产网分区方案" in exported.read_text(encoding="utf-8")
+
+    assert main(["--home", home, "status"]) == 0
+    status_out = capsys.readouterr().out
+    assert "remediation_tasks:" in status_out
+    assert "evidence_files:" in status_out
+
+
 def test_risks_export_unknown_assessment(tmp_path: Path, capsys) -> None:
     home = str(tmp_path)
     main(["--home", home, "init"])
