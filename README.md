@@ -12,10 +12,10 @@ AegisGRC 面向独立安全顾问与小团队咨询方：不需要云服务、�
 | M2 | 资产与威胁面：资产清单、CIA 分级、威胁目录、资产威胁配对、CSV 导入导出 | 已完成 |
 | M3 | 风险评估：可能性与影响矩阵、固有/剩余风险、处置策略 | 已完成 |
 | M4 | 控制库与合规映射：控制项、适用性声明 SoA、框架映射 | 已完成 |
-| M5 | 访谈、证据与整改：访谈记录、证据附件、整改任务 | 规划中 |
+| M5 | 整改与证据：整改任务、状态流转、内容寻址证据、逾期清单 | 已完成 |
 | M6 | 报告与运营：报告生成、备份恢复、指标看板、加固与发布 | 规划中 |
 
-每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，M3 交付评估批次与风险登记册，M4 交付控制库、适用性声明与风险覆盖，证据与整改留给 M5。
+每个里程碑只做自己那一段，不提前实现后续能力。M2 交付资产台账与威胁面，M3 交付评估批次与风险登记册，M4 交付控制库、适用性声明与风险覆盖，M5 交付整改任务与证据文件。
 
 ## 快速开始
 
@@ -63,6 +63,16 @@ aegis controls list --framework ISO27001 --domain A.8
 aegis controls coverage --engagement ENG-2026-0001 --assessment RA-0001
 aegis soa generate --engagement ENG-2026-0001 --framework ISO27001
 aegis soa export --engagement ENG-2026-0001 --framework ISO27001 --out soa.csv
+
+aegis remediation list --engagement ENG-2026-0001
+aegis remediation summary --engagement ENG-2026-0001
+aegis remediation add --engagement ENG-2026-0001 --title "完成离线备份演练" --owner 运维组
+aegis remediation transition --engagement ENG-2026-0001 --task RT-0001 --status in_progress
+aegis remediation export --engagement ENG-2026-0001 --out remediation.csv
+
+aegis evidence list --engagement ENG-2026-0001 --task RT-0001
+aegis evidence add --engagement ENG-2026-0001 --task RT-0001 --file backup-plan.pdf
+aegis evidence export --engagement ENG-2026-0001 --task RT-0001 --out evidence/
 ```
 
 ## 配置
@@ -84,7 +94,7 @@ aegis soa export --engagement ENG-2026-0001 --framework ISO27001 --out soa.csv
 | 角色 | 权限 |
 |---|---|
 | `admin` | `*`，含用户管理与全部写操作 |
-| `consultant` | 客户/项目/干系人/资产/威胁/风险/控制读写，审计只读 |
+| `consultant` | 客户/项目/干系人/资产/威胁/风险/控制/整改/证据读写，审计只读 |
 | `viewer` | 全部只读 |
 
 权限在服务层统一判定（`aegis/security/rbac.py`），Web 与 REST 共用同一套规则，避免两处实现漂移。
@@ -148,6 +158,14 @@ aegis soa export --engagement ENG-2026-0001 --framework ISO27001 --out soa.csv
 | GET | `/api/assessments/{id}/coverage` | 风险控制覆盖与未覆盖清单 |
 | GET/POST | `/api/risks/{id}/controls` | 风险项已挂控制 / 建立映射 |
 | DELETE | `/api/risk-controls/{id}` | 解除映射 |
+| GET/POST | `/api/engagements/{id}/remediation-tasks` | 整改任务列表（状态、优先级、逾期）/ 新建 |
+| GET | `/api/engagements/{id}/remediation/summary` | 整改状态、优先级与逾期汇总 |
+| GET/PATCH/DELETE | `/api/remediation-tasks/{id}` | 任务详情 / 更新 / 删除 |
+| POST | `/api/remediation-tasks/{id}/transition` | 状态流转 |
+| POST | `/api/risks/{id}/remediation` | 从评分项生成带风险快照的任务 |
+| GET/POST | `/api/remediation-tasks/{id}/evidence` | 证据列表 / 上传（multipart，10 MiB 上限） |
+| GET | `/api/evidence/{id}/download` | 下载证据原文件 |
+| DELETE | `/api/evidence/{id}` | 删除证据记录与孤立文件 |
 | GET | `/api/audit` | 审计事件查询（实体、动作、操作人、分页） |
 | GET | `/api/dashboard/summary` | 看板聚合数据 |
 
@@ -235,30 +253,41 @@ NIST 取六个功能下的类别，不展开 106 条子类；等保按 10 个安
 
 Web 控制台在"控制库"浏览目录，项目详情进入"适用性声明"，评估详情进入"控制覆盖"。
 
+## 整改与证据
+
+整改任务挂在项目下，编号 `RT-0001` 项目内自增。任务可以直接新建，也可以从评估详情的一条评分项"转整改"，此时资产编号、威胁编号与残余分写入 `risk_snapshot`。即使后续批次移除该评分项，任务仍保留可读的来源说明。
+
+状态机只有四条边：待开始可进入进行中、受阻或取消；进行中可进入受阻、完成或取消；受阻可回到进行中或取消；完成与取消是终态。完成时写入完成时间，回退会被拒绝并返回 `AEG-4001`。删除只对未开始或已取消的任务开放。
+
+逾期口径为截止日期早于今天且任务未结束。跨项目页面 `/remediation` 汇总所有逾期任务，项目页面只显示本项目。汇总同时给出状态分布、优先级分布、逾期数与完成率。
+
+证据文件按 SHA-256 内容寻址存放在数据目录的 `evidence/` 下，数据库只保存摘要、文件名、类型与大小。同一任务重复上传同一文件会返回已有记录，不再落第二份；不同任务上传同一文件共用一份物理文件。删除记录时只有确认没有其他行引用同一摘要，才移除磁盘文件。单个文件上限 10 MiB。
+
 ## 项目结构
 
 ```
 aegis/
   api/            REST 路由、依赖注入、统一响应
-  db/             引擎、自研迁移器、m0001 至 m0004
+  db/             引擎、自研迁移器、m0001 至 m0005
   models/         SQLAlchemy 模型
   risk/           5×5 矩阵常量与分档函数
   services/       业务规则与权限校验的唯一入口
+  storage/        证据文件的内容寻址存储
   security/       口令哈希、令牌、RBAC、输入校验
   web/            Jinja2 服务端渲染路由
-  templates/      24 个页面模板
+  templates/      26 个页面模板
   static/         原生 CSS/JS，无构建链
   config.py       环境配置与启动校验
   errors.py       统一错误码
   cli.py          运维命令
-tests/            149 个用例，覆盖配置、迁移、安全、API、Web、CLI
+tests/            164 个用例，覆盖配置、迁移、安全、API、Web、CLI
 docs/design/      设计取舍记录
 ```
 
 ## 测试
 
 ```bash
-pytest            # 149 passed
+pytest            # 164 passed
 ```
 
 测试使用内存 SQLite 与 `TestClient`，不依赖网络与外部服务，可在 CI 中直接运行。
@@ -271,6 +300,7 @@ pytest            # 149 passed
 - [m2-assets.md](docs/design/m2-assets.md)：资产挂项目、派生分不落库、导入部分成功
 - [m3-risks.md](docs/design/m3-risks.md)：批次冻结、快照匹配、单一偏好阈值
 - [m4-controls.md](docs/design/m4-controls.md)：全局目录、惰性 SoA、排除理由、映射随批次、两个覆盖率口径
+- [m5-remediation.md](docs/design/m5-remediation.md)：任务为操作单元、状态机、风险快照、内容寻址、证据幂等、逾期口径
 
 ## 许可
 
