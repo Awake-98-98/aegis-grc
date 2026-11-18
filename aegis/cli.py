@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -25,10 +26,12 @@ from aegis.models import (
     Control,
     ControlFramework,
     Engagement,
+    EvidenceFile,
     RiskAppetite,
     RiskAssessment,
     RiskControlLink,
     RiskItem,
+    RemediationTask,
     Session as LoginSession,
     SoAEntry,
     Stakeholder,
@@ -41,9 +44,18 @@ from aegis.services.auth import AuthContext, AuthService
 from aegis.services.clients import ClientService
 from aegis.services.controls import ControlService, RiskControlService, SoAService
 from aegis.services.engagements import EngagementService
+from aegis.services.remediation import (
+    PRIORITY_LABELS,
+    REMEDIATION_PRIORITIES,
+    REMEDIATION_STATUSES,
+    STATUS_LABELS as REMEDIATION_STATUS_LABELS,
+    EvidenceService,
+    RemediationService,
+)
 from aegis.services.risks import RiskAssessmentService, RiskService
 from aegis.services.stakeholders import StakeholderService
 from aegis.services.threats import ThreatService
+from aegis.storage.cas import EvidenceStore
 from aegis.util.time import utcnow
 
 
@@ -117,6 +129,48 @@ def _build_parser() -> argparse.ArgumentParser:
     soa_export.add_argument("--engagement", required=True)
     soa_export.add_argument("--framework", required=True)
     soa_export.add_argument("--out", type=Path, default=None)
+
+    remediation = sub.add_parser("remediation", help="remediation plan utilities")
+    remediation_sub = remediation.add_subparsers(dest="remediation_command", required=True)
+    remediation_list = remediation_sub.add_parser("list", help="list tasks of an engagement")
+    remediation_list.add_argument("--engagement", required=True)
+    remediation_list.add_argument("--status", default="", choices=[""] + list(REMEDIATION_STATUSES))
+    remediation_list.add_argument(
+        "--priority", default="", choices=[""] + list(REMEDIATION_PRIORITIES)
+    )
+    remediation_list.add_argument("--overdue", action="store_true", help="only overdue tasks")
+    remediation_summary = remediation_sub.add_parser("summary", help="status and due counts")
+    remediation_summary.add_argument("--engagement", required=True)
+    remediation_add = remediation_sub.add_parser("add", help="create a remediation task")
+    remediation_add.add_argument("--engagement", required=True)
+    remediation_add.add_argument("--title", required=True)
+    remediation_add.add_argument("--description", default="")
+    remediation_add.add_argument("--priority", default="medium", choices=list(REMEDIATION_PRIORITIES))
+    remediation_add.add_argument("--owner", default="")
+    remediation_add.add_argument("--due", default="", help="due date, e.g. 2026-12-31")
+    remediation_add.add_argument("--notes", default="")
+    remediation_transition = remediation_sub.add_parser("transition", help="move a task")
+    remediation_transition.add_argument("--engagement", required=True)
+    remediation_transition.add_argument("--task", required=True, help="task code, e.g. RT-0001")
+    remediation_transition.add_argument("--status", required=True, choices=list(REMEDIATION_STATUSES))
+    remediation_transition.add_argument("--note", default="")
+    remediation_export = remediation_sub.add_parser("export", help="export tasks as CSV")
+    remediation_export.add_argument("--engagement", required=True)
+    remediation_export.add_argument("--out", type=Path, default=None)
+
+    evidence = sub.add_parser("evidence", help="evidence file utilities")
+    evidence_sub = evidence.add_subparsers(dest="evidence_command", required=True)
+    evidence_list = evidence_sub.add_parser("list", help="list evidence of a task")
+    evidence_list.add_argument("--engagement", required=True)
+    evidence_list.add_argument("--task", required=True, help="task code, e.g. RT-0001")
+    evidence_add = evidence_sub.add_parser("add", help="attach a file to a task")
+    evidence_add.add_argument("--engagement", required=True)
+    evidence_add.add_argument("--task", required=True)
+    evidence_add.add_argument("--file", required=True, type=Path)
+    evidence_export = evidence_sub.add_parser("export", help="write all evidence files to a folder")
+    evidence_export.add_argument("--engagement", required=True)
+    evidence_export.add_argument("--task", required=True)
+    evidence_export.add_argument("--out", required=True, type=Path)
     return parser
 
 
@@ -279,6 +333,16 @@ def cmd_status(settings: Settings) -> int:
                 db.execute(
                     select(func.count(RiskControlLink.id)).select_from(RiskControlLink)
                 ).scalar()
+                or 0
+            ),
+            "remediation_tasks": int(
+                db.execute(
+                    select(func.count(RemediationTask.id)).select_from(RemediationTask)
+                ).scalar()
+                or 0
+            ),
+            "evidence_files": int(
+                db.execute(select(func.count(EvidenceFile.id)).select_from(EvidenceFile)).scalar()
                 or 0
             ),
         }
@@ -684,6 +748,55 @@ def cmd_seed_demo(args, settings: Settings) -> int:
             coverage="full",
             notes="特权账号统一经堡垒机接入并强制多因素认证。",
         )
+
+        remediation = RemediationService(db, EvidenceStore(settings.evidence_path))
+        today = date.today()
+        rt1 = remediation.create(
+            ctx,
+            e1.id,
+            title="完成 MES 生产网与办公网分区",
+            description="按 VLAN 与防火墙策略隔离生产网，收敛办公终端到 MES 的访问路径。",
+            priority="high",
+            owner="孙鹏",
+            due_date=today - timedelta(days=5),
+            risk_item_id=first_items[("生产执行系统 MES", "勒索软件加密生产数据")].id,
+        )
+        remediation.transition(ctx, rt1.id, "in_progress", note="分区方案已评审")
+        remediation.create(
+            ctx,
+            e1.id,
+            title="建设 ERP 数据库异地副本",
+            description="在异地机房部署每日增量副本，季度执行恢复演练并留存记录。",
+            priority="medium",
+            owner="赵蕾",
+            due_date=today + timedelta(days=14),
+            risk_item_id=first_items[("ERP 财务数据库", "勒索软件加密生产数据")].id,
+        )
+        rt3 = remediation.create(
+            ctx,
+            e1.id,
+            title="更换机房 UPS 电池组",
+            description="更换超期电池组并完成带载放电测试。",
+            priority="low",
+            owner="王海",
+            due_date=today - timedelta(days=20),
+            risk_item_id=first_items[("园区核心交换机", "机房供电中断")].id,
+        )
+        remediation.transition(ctx, rt3.id, "in_progress")
+        remediation.transition(ctx, rt3.id, "done", note="电池组更换与测试完成")
+        EvidenceService(db, EvidenceStore(settings.evidence_path)).attach(
+            ctx,
+            rt1.id,
+            filename="mes-segmentation-plan.txt",
+            data=(
+                "MES 生产网分区方案（演示文件）\n"
+                "1. 生产网与办公网按 VLAN 隔离。\n"
+                "2. 仅允许运维堡垒机跳转访问 MES 端口。\n"
+                "3. 变更窗口外禁止直接操作生产配置。\n"
+            ).encode("utf-8"),
+            content_type="text/plain",
+        )
+
         print("demo data loaded:")
         print(f"  clients:     {north.code}, {bank.code}, {clinic.code}")
         print(f"  engagements: {e1.code}, {e2.code}, {e3.code}")
@@ -692,6 +805,7 @@ def cmd_seed_demo(args, settings: Settings) -> int:
         print(f"  controls:    ISO 27001 93 项、NIST CSF 22 项、等保 2.0 70 项")
         print(f"  soa:         {e1.code} ISO 27001、{e2.code} 等保 2.0")
         print(f"  coverage:    {first.code} 已覆盖 2/5，保留 3 项未覆盖风险")
+        print(f"  remediation: {e1.code} 下 3 个任务（1 逾期、1 进行中、1 已完成），1 份证据")
         if created_admin:
             print(f"  demo admin:  {demo_email} / {demo_password}")
     engine.dispose()
@@ -1001,6 +1115,183 @@ def cmd_soa(args, settings: Settings) -> int:
         engine.dispose()
 
 
+def cmd_remediation(args, settings: Settings) -> int:
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+            service = RemediationService(db, EvidenceStore(settings.evidence_path))
+
+            if args.remediation_command == "list":
+                rows, total, _, _ = service.list(
+                    ctx,
+                    engagement.id,
+                    status=args.status,
+                    priority=args.priority,
+                    overdue=args.overdue,
+                    page_size=200,
+                )
+                if not rows:
+                    print(f"no remediation tasks for {engagement.code}")
+                    return 0
+                print(f"{'code':<9}{'status':<13}{'priority':<10}{'due':<12}{'owner':<10}title")
+                for row in rows:
+                    print(
+                        f"{row.code:<9}"
+                        f"{REMEDIATION_STATUS_LABELS.get(row.status, row.status):<13}"
+                        f"{PRIORITY_LABELS.get(row.priority, row.priority):<10}"
+                        f"{row.due_date or '-':<12}"
+                        f"{row.owner or '-':<10}"
+                        f"{row.title}"
+                    )
+                print(f"total {total}")
+                return 0
+
+            if args.remediation_command == "summary":
+                summary = service.summary(ctx, engagement.id)
+                print(f"total: {summary['total']}")
+                for status in REMEDIATION_STATUSES:
+                    print(f"{status + ':':<14}{summary['by_status'][status]}")
+                print(f"{'overdue:':<14}{summary['overdue']}")
+                print(f"{'due_soon:':<14}{summary['due_soon']}")
+                print(f"{'completion:':<14}{summary['completion_pct']}%")
+                return 0
+
+            if args.remediation_command == "add":
+                task = service.create(
+                    ctx,
+                    engagement.id,
+                    title=args.title,
+                    description=args.description,
+                    priority=args.priority,
+                    owner=args.owner,
+                    due_date=args.due,
+                    notes=args.notes,
+                )
+                print(f"created {task.code} {task.title} (due {task.due_date or '-'})")
+                return 0
+
+            if args.remediation_command == "transition":
+                task = _task_by_code(db, engagement.id, args.task)
+                if task is None:
+                    print(f"error: task not found: {args.task}", file=sys.stderr)
+                    return 2
+                task = service.transition(ctx, task.id, args.status, note=args.note)
+                print(
+                    f"{task.code}: {REMEDIATION_STATUS_LABELS.get(task.status, task.status)}"
+                )
+                return 0
+
+            rows, total, _, _ = service.list(ctx, engagement.id, page_size=1000)
+            counts = EvidenceService(
+                db, EvidenceStore(settings.evidence_path)
+            ).counts_for_tasks([row.id for row in rows])
+            lines = [
+                "code,title,priority,status,owner,due_date,risk_snapshot,evidence_count"
+            ]
+            for row in rows:
+                lines.append(
+                    ",".join(
+                        _csv_cell(value)
+                        for value in (
+                            row.code,
+                            row.title,
+                            row.priority,
+                            row.status,
+                            row.owner,
+                            row.due_date.isoformat() if row.due_date else "",
+                            row.risk_snapshot,
+                            counts.get(row.id, 0),
+                        )
+                    )
+                )
+            text = "\ufeff" + "\n".join(lines) + "\n"
+            if args.out:
+                args.out.write_text(text, encoding="utf-8")
+                print(f"exported {len(rows)} tasks to {args.out}")
+            else:
+                sys.stdout.write(text)
+            return 0
+    finally:
+        engine.dispose()
+
+
+def cmd_evidence(args, settings: Settings) -> int:
+    engine, factory = _open(settings)
+    try:
+        with factory() as db:
+            ctx = _cli_ctx(_operating_user(db))
+            engagement = db.execute(
+                select(Engagement).where(Engagement.code == args.engagement)
+            ).scalar_one_or_none()
+            if engagement is None:
+                print(f"error: engagement not found: {args.engagement}", file=sys.stderr)
+                return 2
+            task = _task_by_code(db, engagement.id, args.task)
+            if task is None:
+                print(f"error: task not found: {args.task}", file=sys.stderr)
+                return 2
+            service = EvidenceService(db, EvidenceStore(settings.evidence_path))
+
+            if args.evidence_command == "list":
+                rows = service.list(ctx, task.id)
+                if not rows:
+                    print(f"no evidence for {task.code}")
+                    return 0
+                print(f"{'sha256':<14}{'bytes':<10}{'content_type':<24}filename")
+                for row in rows:
+                    print(
+                        f"{row.sha256[:12]:<14}{row.size_bytes:<10}"
+                        f"{(row.content_type or '-'):<24}{row.filename}"
+                    )
+                return 0
+
+            if args.evidence_command == "add":
+                if not args.file.exists():
+                    print(f"error: file not found: {args.file}", file=sys.stderr)
+                    return 2
+                row, created = service.attach(
+                    ctx,
+                    task.id,
+                    filename=args.file.name,
+                    data=args.file.read_bytes(),
+                )
+                action = "attached" if created else "already attached"
+                print(f"{action} {row.filename} sha256={row.sha256[:12]}")
+                return 0
+
+            rows = service.list(ctx, task.id)
+            if not rows:
+                print(f"no evidence for {task.code}")
+                return 0
+            args.out.mkdir(parents=True, exist_ok=True)
+            for row in rows:
+                name = Path(row.filename).name or "evidence.bin"
+                target = args.out / name
+                if target.exists():
+                    target = args.out / f"{row.id[:8]}-{name}"
+                target.write_bytes(service.download(ctx, row.id)[1])
+            print(f"exported {len(rows)} files to {args.out}")
+            return 0
+    finally:
+        engine.dispose()
+
+
+def _task_by_code(db, engagement_id: str, code: str) -> RemediationTask | None:
+    return db.execute(
+        select(RemediationTask).where(
+            RemediationTask.engagement_id == engagement_id,
+            RemediationTask.code == code,
+        )
+    ).scalar_one_or_none()
+
+
 def _operating_user(db) -> User:
     """CLI actions need an actor; use the oldest active administrator."""
     admin = db.execute(
@@ -1032,6 +1323,8 @@ COMMANDS = {
     "risks": cmd_risks,
     "controls": cmd_controls,
     "soa": cmd_soa,
+    "remediation": cmd_remediation,
+    "evidence": cmd_evidence,
 }
 
 
