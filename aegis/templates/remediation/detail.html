@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{{ task.code }} · 整改任务{% endblock %}
+{% block eyebrow %}整改任务 · {{ engagement.code }}{% endblock %}
+{% block heading %}{{ task.title }}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <a class="button" href="/engagements/{{ engagement.id }}/remediation">返回整改清单</a>
+  <a class="button" href="/engagements/{{ engagement.id }}">返回项目</a>
+  <span class="badge">{{ status_labels.get(task.status, task.status) }}</span>
+  <span class="badge">{{ priority_labels.get(task.priority, task.priority) }}</span>
+  {% if task.is_overdue %}<span class="badge">逾期</span>{% endif %}
+  <div class="spacer"></div>
+  {% if can(current_user.role, 'remediation:write') and task.status in ('open', 'cancelled') %}
+  <form method="post" action="/remediation/{{ task.id }}/delete" onsubmit="return confirm('确认删除该整改任务及其证据？');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button" type="submit">删除任务</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="split">
+  <section class="card">
+    <div class="card-head"><h3>任务信息</h3><span class="mono small">{{ task.code }}</span></div>
+    <dl class="facts">
+      <dt>所属项目</dt><dd><a href="/engagements/{{ engagement.id }}">{{ engagement.code }} · {{ engagement.name }}</a></dd>
+      <dt>负责人</dt><dd>{{ task.owner or '未指定' }}</dd>
+      <dt>优先级</dt><dd>{{ priority_labels.get(task.priority, task.priority) }}</dd>
+      <dt>状态</dt><dd>{{ status_labels.get(task.status, task.status) }}</dd>
+      <dt>截止日期</dt><dd>{{ task.due_date or '-' }}</dd>
+      <dt>完成时间</dt><dd>{{ task.completed_at | short_time }}</dd>
+      <dt>风险来源</dt><dd>{{ task.risk_snapshot or '未关联评分项' }}</dd>
+      <dt>创建时间</dt><dd>{{ task.created_at | short_time }}</dd>
+    </dl>
+    <h4>工作说明</h4>
+    <p class="notes">{{ task.description or '尚未填写。' }}</p>
+    <h4>备注</h4>
+    <p class="notes">{{ task.notes or '尚未填写。' }}</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>状态流转</h3></div>
+    {% if can(current_user.role, 'remediation:write') and next_statuses %}
+    <form method="post" action="/remediation/{{ task.id }}/transition" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>目标状态
+        <select name="status">
+          {% for item in next_statuses %}
+          <option value="{{ item }}">{{ status_labels.get(item, item) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>说明
+        <input type="text" name="note" maxlength="500" placeholder="可选，会写入审计轨迹">
+      </label>
+      <button class="button primary" type="submit">更新状态</button>
+    </form>
+    {% elif not next_statuses %}
+    <p class="empty">任务已结束，无可用流转。</p>
+    {% else %}
+    <p class="muted small">当前角色只读，无法更新状态。</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>证据文件</h3>
+    <span class="muted small">{{ evidence | length }} 个文件</span>
+  </div>
+  {% if evidence %}
+  <table class="table compact">
+    <thead><tr><th>文件名</th><th>类型</th><th>大小</th><th>上传时间</th><th>摘要</th><th></th></tr></thead>
+    <tbody>
+    {% for item in evidence %}
+      <tr>
+        <td><a href="/evidence/{{ item.id }}/download">{{ item.filename }}</a></td>
+        <td>{{ item.content_type or '-' }}</td>
+        <td>{{ (item.size_bytes / 1024) | round(1) }} KB</td>
+        <td>{{ item.created_at | short_time }}</td>
+        <td class="mono small">{{ item.sha256[:12] }}</td>
+        <td class="right">
+          {% if can(current_user.role, 'evidence:write') %}
+          <form method="post" action="/evidence/{{ item.id }}/delete" onsubmit="return confirm('确认删除该证据文件？');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="link-button" type="submit">删除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">尚未上传证据。</p>
+  {% endif %}
+  {% if can(current_user.role, 'evidence:write') %}
+  <form method="post" action="/remediation/{{ task.id }}/evidence" enctype="multipart/form-data" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="file" name="file" required>
+    <button class="button primary" type="submit">上传证据</button>
+    <span class="muted small">单个文件不超过 10 MiB，重复文件按摘要自动去重。</span>
+  </form>
+  {% endif %}
+</section>
+
+{% if can(current_user.role, 'remediation:write') %}
+<section class="card">
+  <div class="card-head"><h3>编辑任务</h3></div>
+  <form method="post" action="/remediation/{{ task.id }}/edit" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>任务标题
+      <input type="text" name="title" maxlength="200" value="{{ task.title }}" required>
+    </label>
+    <label>工作说明
+      <textarea name="description" rows="3" maxlength="4000">{{ task.description }}</textarea>
+    </label>
+    <label>优先级
+      <select name="priority">
+        {% for item in priorities %}
+        <option value="{{ item }}" {{ 'selected' if item == task.priority else '' }}>{{ priority_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>负责人
+      <input type="text" name="owner" maxlength="120" value="{{ task.owner }}">
+    </label>
+    <label>截止日期
+      <input type="date" name="due_date" value="{{ task.due_date or '' }}">
+    </label>
+    <label>备注
+      <textarea name="notes" rows="2" maxlength="4000">{{ task.notes }}</textarea>
+    </label>
+    <button class="button primary" type="submit">保存修改</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

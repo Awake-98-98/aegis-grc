@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}整改计划{% endblock %}
+{% block eyebrow %}整改计划{% if engagement %} · {{ engagement.code }}{% endif %}{% endblock %}
+{% block heading %}{% if engagement %}{{ engagement.name }} · 整改计划{% else %}整改计划{% endif %}{% endblock %}
+{% block content %}
+<div class="toolbar">
+  {% if engagement %}
+  <a class="button" href="/engagements/{{ engagement.id }}">返回项目</a>
+  <a class="button" href="/remediation">跨项目视图</a>
+  {% else %}
+  <span class="muted small">跨项目整改任务与逾期清单</span>
+  {% endif %}
+  <div class="spacer"></div>
+  {% if engagement and can(current_user.role, 'remediation:write') %}
+  <a class="button primary" href="#new-task">新建整改任务</a>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <span class="stat-label">任务总数</span>
+    <strong class="stat-value">{{ summary.total }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">进行中</span>
+    <strong class="stat-value">{{ summary.by_status.get('in_progress', 0) }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">逾期</span>
+    <strong class="stat-value">{{ summary.overdue }}</strong>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">完成率</span>
+    <strong class="stat-value">{{ summary.completion_pct }}%</strong>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <h3>任务清单</h3>
+    <span class="muted small">共 {{ total }} 项</span>
+  </div>
+  <form method="get" action="{{ '/remediation' if not engagement else '/engagements/' ~ engagement.id ~ '/remediation' }}" class="inline-form">
+    {% if not engagement %}
+    <input type="search" name="q" value="{{ q }}" placeholder="按编号、标题或负责人搜索">
+    {% endif %}
+    <select name="status">
+      <option value="">全部状态</option>
+      {% for item in statuses %}
+      <option value="{{ item }}" {{ 'selected' if item == status else '' }}>{{ status_labels.get(item, item) }}</option>
+      {% endfor %}
+    </select>
+    <select name="priority">
+      <option value="">全部优先级</option>
+      {% for item in priorities %}
+      <option value="{{ item }}" {{ 'selected' if item == priority else '' }}>{{ priority_labels.get(item, item) }}</option>
+      {% endfor %}
+    </select>
+    <label class="check">
+      <input type="checkbox" name="overdue" value="true" {{ 'checked' if overdue else '' }}>
+      仅看逾期
+    </label>
+    <button class="button" type="submit">筛选</button>
+    {% if status or priority or overdue or q %}
+    <a class="quiet" href="{{ '/remediation' if not engagement else '/engagements/' ~ engagement.id ~ '/remediation' }}">清除</a>
+    {% endif %}
+  </form>
+
+  {% if tasks %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>编号</th>
+        <th>任务</th>
+        {% if not engagement %}<th>项目</th>{% endif %}
+        <th>负责人</th>
+        <th>优先级</th>
+        <th>状态</th>
+        <th>截止日期</th>
+        <th>证据</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for task in tasks %}
+      <tr>
+        <td class="mono"><a href="/remediation/{{ task.id }}">{{ task.code }}</a></td>
+        <td>
+          <a href="/remediation/{{ task.id }}">{{ task.title }}</a>
+          {% if task.risk_snapshot %}<br><span class="muted small">{{ task.risk_snapshot }}</span>{% endif %}
+        </td>
+        {% if not engagement %}
+        <td>{{ engagements[task.engagement_id].code if task.engagement_id in engagements else '-' }}</td>
+        {% endif %}
+        <td>{{ task.owner or '-' }}</td>
+        <td>{{ priority_labels.get(task.priority, task.priority) }}</td>
+        <td>{{ status_labels.get(task.status, task.status) }}</td>
+        <td>
+          {{ task.due_date or '-' }}
+          {% if task.is_overdue %}<span class="badge">逾期</span>{% endif %}
+        </td>
+        <td>{{ evidence_counts.get(task.id, 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}
+    <a class="button" href="{{ '/remediation' if not engagement else '/engagements/' ~ engagement.id ~ '/remediation' }}?status={{ status }}&priority={{ priority }}&overdue={{ 'true' if overdue else 'false' }}&q={{ q | urlencode }}&page={{ page - 1 }}">上一页</a>
+    {% endif %}
+    <span class="muted small">第 {{ page }} / {{ pages }} 页</span>
+    {% if page < pages %}
+    <a class="button" href="{{ '/remediation' if not engagement else '/engagements/' ~ engagement.id ~ '/remediation' }}?status={{ status }}&priority={{ priority }}&overdue={{ 'true' if overdue else 'false' }}&q={{ q | urlencode }}&page={{ page + 1 }}">下一页</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="empty">没有符合条件的整改任务。</p>
+  {% endif %}
+</section>
+
+{% if engagement and can(current_user.role, 'remediation:write') %}
+<section class="card" id="new-task">
+  <div class="card-head"><h3>新建整改任务</h3></div>
+  <form method="post" action="/engagements/{{ engagement.id }}/remediation" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>任务标题
+      <input type="text" name="title" maxlength="200" required>
+    </label>
+    <label>工作说明
+      <textarea name="description" rows="3" maxlength="4000"></textarea>
+    </label>
+    <label>优先级
+      <select name="priority">
+        {% for item in priorities %}
+        <option value="{{ item }}" {{ 'selected' if item == 'medium' else '' }}>{{ priority_labels.get(item, item) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>负责人
+      <input type="text" name="owner" maxlength="120" placeholder="姓名或岗位">
+    </label>
+    <label>截止日期
+      <input type="date" name="due_date">
+    </label>
+    <label>备注
+      <textarea name="notes" rows="2" maxlength="4000"></textarea>
+    </label>
+    <button class="button primary" type="submit">创建任务</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

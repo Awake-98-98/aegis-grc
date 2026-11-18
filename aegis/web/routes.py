@@ -9,16 +9,17 @@ service as the API, and renders the result.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from aegis.api.responses import clear_session_cookie, set_session_cookie
 from aegis.config import Settings
 from aegis.errors import CsrfFailure, Unauthorized, ValidationFailure
-from aegis.models import AssetThreat, RiskControlLink, RiskItem, User
+from aegis.models import AssetThreat, Engagement, RiskControlLink, RiskItem, User
 from aegis.security.tokens import csrf_matches
 from aegis.security.validation import (
     ASSET_CATEGORIES,
@@ -56,6 +57,15 @@ from aegis.services.controls import (
 )
 from aegis.services.dashboard import DashboardService
 from aegis.services.engagements import ALLOWED_TRANSITIONS, EngagementService
+from aegis.services.remediation import (
+    ALLOWED_TRANSITIONS as REMEDIATION_TRANSITIONS,
+    PRIORITY_LABELS,
+    REMEDIATION_PRIORITIES,
+    REMEDIATION_STATUSES,
+    STATUS_LABELS as REMEDIATION_STATUS_LABELS,
+    EvidenceService,
+    RemediationService,
+)
 from aegis.services.risks import (
     ASSESSMENT_STATUS_LABELS,
     DEFAULT_APPETITE,
@@ -65,6 +75,7 @@ from aegis.services.risks import (
 )
 from aegis.services.stakeholders import StakeholderService
 from aegis.services.threats import ThreatService
+from aegis.storage.cas import EvidenceStore
 
 router = APIRouter(tags=["web"])
 
@@ -131,6 +142,14 @@ def _active_users(db: Session) -> list[User]:
 
 def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
+
+
+def _remediation_service(db: Session, settings: Settings) -> RemediationService:
+    return RemediationService(db, EvidenceStore(settings.evidence_path))
+
+
+def _evidence_service(db: Session, settings: Settings) -> EvidenceService:
+    return EvidenceService(db, EvidenceStore(settings.evidence_path))
 
 
 # ----------------------------------------------------------------------- public
@@ -1478,6 +1497,311 @@ async def risk_control_unlink_submit(
     if assessment_id:
         return _redirect(f"/assessments/{assessment_id}/coverage")
     return _redirect("/engagements")
+
+
+# ----------------------------------------------------------------------- remediation
+@router.get("/remediation", response_class=HTMLResponse)
+def remediation_page(
+    request: Request,
+    status: str = "",
+    priority: str = "",
+    overdue: bool = False,
+    q: str = "",
+    page: int = 1,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = _remediation_service(db, settings)
+    rows, total, page, page_size = service.list_all(
+        ctx,
+        status=status,
+        priority=priority,
+        overdue=overdue,
+        q=q,
+        page=page,
+        page_size=30,
+    )
+    counts = _evidence_service(db, settings).counts_for_tasks([row.id for row in rows])
+    engagements = {
+        row.id: row for row in db.execute(select(Engagement)).scalars()
+    }
+    pages = (total + page_size - 1) // page_size if total else 1
+    return _render(
+        request,
+        "remediation/list.html",
+        ctx,
+        nav="remediation",
+        tasks=rows,
+        engagement=None,
+        engagements=engagements,
+        evidence_counts=counts,
+        summary=service.summary(ctx),
+        statuses=REMEDIATION_STATUSES,
+        priorities=REMEDIATION_PRIORITIES,
+        status_labels=REMEDIATION_STATUS_LABELS,
+        priority_labels=PRIORITY_LABELS,
+        status=status,
+        priority=priority,
+        overdue=overdue,
+        q=q,
+        total=total,
+        page=page,
+        pages=pages,
+    )
+
+
+@router.get("/engagements/{engagement_id}/remediation", response_class=HTMLResponse)
+def engagement_remediation_page(
+    engagement_id: str,
+    request: Request,
+    status: str = "",
+    priority: str = "",
+    overdue: bool = False,
+    page: int = 1,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    engagement = EngagementService(db).get_for(ctx, engagement_id)
+    service = _remediation_service(db, settings)
+    rows, total, page, page_size = service.list(
+        ctx,
+        engagement.id,
+        status=status,
+        priority=priority,
+        overdue=overdue,
+        page=page,
+        page_size=30,
+    )
+    counts = _evidence_service(db, settings).counts_for_tasks([row.id for row in rows])
+    pages = (total + page_size - 1) // page_size if total else 1
+    return _render(
+        request,
+        "remediation/list.html",
+        ctx,
+        nav="engagements",
+        tasks=rows,
+        engagement=engagement,
+        engagements={engagement.id: engagement},
+        evidence_counts=counts,
+        summary=service.summary(ctx, engagement.id),
+        statuses=REMEDIATION_STATUSES,
+        priorities=REMEDIATION_PRIORITIES,
+        status_labels=REMEDIATION_STATUS_LABELS,
+        priority_labels=PRIORITY_LABELS,
+        status=status,
+        priority=priority,
+        overdue=overdue,
+        q="",
+        total=total,
+        page=page,
+        pages=pages,
+    )
+
+
+@router.get("/remediation/{task_id}", response_class=HTMLResponse)
+def remediation_detail_page(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    service = _remediation_service(db, settings)
+    task = service.get_for(ctx, task_id)
+    engagement = EngagementService(db).get_for(ctx, task.engagement_id)
+    return _render(
+        request,
+        "remediation/detail.html",
+        ctx,
+        nav="remediation",
+        task=task,
+        engagement=engagement,
+        evidence=_evidence_service(db, settings).list(ctx, task.id),
+        next_statuses=sorted(REMEDIATION_TRANSITIONS.get(task.status, set())),
+        status_labels=REMEDIATION_STATUS_LABELS,
+        priority_labels=PRIORITY_LABELS,
+        priorities=REMEDIATION_PRIORITIES,
+    )
+
+
+@router.post("/engagements/{engagement_id}/remediation", response_class=HTMLResponse)
+async def remediation_create_submit(
+    engagement_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    task = _remediation_service(db, settings).create(
+        ctx,
+        engagement_id,
+        title=form.get("title", ""),
+        description=form.get("description", ""),
+        priority=form.get("priority", "medium"),
+        owner=form.get("owner", ""),
+        due_date=form.get("due_date", ""),
+        notes=form.get("notes", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/remediation/{task.id}")
+
+
+@router.post("/risks/{risk_id}/remediation", response_class=HTMLResponse)
+async def remediation_from_risk_submit(
+    risk_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    task = _remediation_service(db, settings).create_from_risk(
+        ctx,
+        risk_id,
+        owner=form.get("owner", ""),
+        due_date=form.get("due_date", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/remediation/{task.id}")
+
+
+@router.post("/remediation/{task_id}/edit", response_class=HTMLResponse)
+async def remediation_edit_submit(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    _remediation_service(db, settings).update(
+        ctx,
+        task_id,
+        title=form.get("title", ""),
+        description=form.get("description", ""),
+        priority=form.get("priority", "medium"),
+        owner=form.get("owner", ""),
+        due_date=form.get("due_date", ""),
+        notes=form.get("notes", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/remediation/{task_id}")
+
+
+@router.post("/remediation/{task_id}/transition", response_class=HTMLResponse)
+async def remediation_transition_submit(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    _remediation_service(db, settings).transition(
+        ctx,
+        task_id,
+        form.get("status", ""),
+        note=form.get("note", ""),
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/remediation/{task_id}")
+
+
+@router.post("/remediation/{task_id}/delete", response_class=HTMLResponse)
+async def remediation_delete_submit(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    task = _remediation_service(db, settings).get_for(ctx, task_id)
+    engagement_id = task.engagement_id
+    _remediation_service(db, settings).delete(
+        ctx, task_id, ip=ip, user_agent=user_agent
+    )
+    return _redirect(f"/engagements/{engagement_id}/remediation")
+
+
+@router.post("/remediation/{task_id}/evidence", response_class=HTMLResponse)
+async def remediation_evidence_submit(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await request.form()
+    _check_csrf(ctx, {key: str(value) for key, value in form.items()})
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        raise ValidationFailure("evidence file is required")
+    ip, user_agent = _ip(request)
+    _evidence_service(db, settings).attach(
+        ctx,
+        task_id,
+        filename=upload.filename or "",
+        data=await upload.read(),
+        content_type=upload.content_type or "",
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _redirect(f"/remediation/{task_id}")
+
+
+@router.post("/evidence/{evidence_id}/delete", response_class=HTMLResponse)
+async def evidence_delete_submit(
+    evidence_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    form = await _form(request)
+    _check_csrf(ctx, form)
+    ip, user_agent = _ip(request)
+    service = _evidence_service(db, settings)
+    row = service.get(ctx, evidence_id)
+    task_id = row.remediation_task_id
+    service.delete(ctx, evidence_id, ip=ip, user_agent=user_agent)
+    return _redirect(f"/remediation/{task_id}")
+
+
+@router.get("/evidence/{evidence_id}/download")
+def evidence_download(
+    evidence_id: str,
+    request: Request,
+    db: Session = Depends(get_web_db),
+    settings: Settings = Depends(get_web_settings),
+):
+    ctx = _require_ctx(request, db, settings)
+    row, data = _evidence_service(db, settings).download(ctx, evidence_id)
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(row.filename)}"
+    }
+    return Response(
+        content=data,
+        media_type=row.content_type or "application/octet-stream",
+        headers=headers,
+    )
 
 
 # ---------------------------------------------------------------------------- audit

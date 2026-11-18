@@ -130,6 +130,12 @@
         </td>
         <td class="small">{{ item.rationale or '-' }}</td>
         <td class="right">
+          {% if can(current_user.role, 'remediation:write') %}
+          <form method="post" action="/risks/{{ item.id }}/remediation" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="link-button" type="submit">转整改</button>
+          </form>
+          {% endif %}
           {% if can(current_user.role, 'risk:write') and assessment.status == 'draft' %}
           <a class="link-button" href="/risks/{{ item.id }}/edit">编辑</a>
           <form method="post" action="/risks/{{ item.id }}/delete" class="inline" data-confirm="确认删除该评分？">
