@@ -553,7 +553,7 @@ class RiskControlService(ServiceBase):
                 select(RiskItem)
                 .where(RiskItem.assessment_id == assessment.id)
                 .order_by(
-                    (RiskItem.likelihood * RiskItem.impact).desc(),
+                    (RiskItem.residual_likelihood * RiskItem.residual_impact).desc(),
                     RiskItem.asset_code.asc(),
                     RiskItem.threat_code.asc(),
                 )

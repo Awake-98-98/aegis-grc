@@ -307,6 +307,46 @@ def test_coverage_summary_and_unlink(
     assert after["summary"]["links"] == 1
 
 
+def test_coverage_orders_by_residual_score(
+    client: TestClient, admin_headers: dict
+) -> None:
+    engagement, assessment, first = _setup(client, admin_headers)
+    asset = client.post(
+        f"/api/engagements/{engagement['id']}/assets",
+        json={"name": "备用机房", "category": "facility"},
+        headers=admin_headers,
+    ).json()["data"]
+    threat = client.post(
+        f"/api/engagements/{engagement['id']}/threats",
+        json={"name": "市电中断", "category": "environmental"},
+        headers=admin_headers,
+    ).json()["data"]
+    link = client.post(
+        f"/api/assets/{asset['id']}/threats",
+        json={"threat_id": threat["id"], "vulnerability": "无柴发"},
+        headers=admin_headers,
+    ).json()["data"]
+    second = client.post(
+        f"/api/assessments/{assessment['id']}/risks",
+        json={
+            "asset_threat_id": link["id"],
+            "likelihood": 5,
+            "impact": 5,
+            "residual_likelihood": 1,
+            "residual_impact": 1,
+        },
+        headers=admin_headers,
+    ).json()["data"]
+
+    assert first["likelihood"] * first["impact"] < second["likelihood"] * second["impact"]
+    assert first["residual_score"] > second["residual_score"]
+
+    rows = client.get(
+        f"/api/assessments/{assessment['id']}/coverage", headers=admin_headers
+    ).json()["data"]["rows"]
+    assert [row["risk"]["id"] for row in rows] == [first["id"], second["id"]]
+
+
 def test_soa_is_scoped_to_one_engagement(
     client: TestClient, admin_headers: dict
 ) -> None:
