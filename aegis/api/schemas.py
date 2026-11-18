@@ -221,3 +221,42 @@ class RiskControlLinkRequest(BaseModel):
     control_id: str = Field(min_length=1, max_length=32)
     coverage: str = "partial"
     notes: str = Field(default="", max_length=2000)
+
+
+class RemediationCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    priority: str = "medium"
+    owner: str = Field(default="", max_length=120)
+    owner_user_id: str | None = Field(default=None, max_length=32)
+    control_id: str | None = Field(default=None, max_length=32)
+    due_date: date | None = None
+    notes: str = Field(default="", max_length=4000)
+    risk_item_id: str | None = Field(default=None, max_length=32)
+
+
+class RemediationFromRiskRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    priority: str = "medium"
+    owner: str = Field(default="", max_length=120)
+    owner_user_id: str | None = Field(default=None, max_length=32)
+    control_id: str | None = Field(default=None, max_length=32)
+    due_date: date | None = None
+    notes: str = Field(default="", max_length=4000)
+
+
+class RemediationUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=4000)
+    priority: str | None = None
+    owner: str | None = Field(default=None, max_length=120)
+    owner_user_id: str | None = Field(default=None, max_length=32)
+    control_id: str | None = Field(default=None, max_length=32)
+    due_date: date | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class RemediationTransitionRequest(BaseModel):
+    status: str
+    note: str = Field(default="", max_length=500)
