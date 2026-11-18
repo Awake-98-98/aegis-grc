@@ -8,6 +8,7 @@ field in one place without the other is visible immediately.
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from aegis.models import (
     Asset,
@@ -17,6 +18,8 @@ from aegis.models import (
     Control,
     ControlFramework,
     Engagement,
+    EvidenceFile,
+    RemediationTask,
     RiskAppetite,
     RiskAssessment,
     RiskControlLink,
@@ -318,6 +321,55 @@ def risk_control_link_public(link: RiskControlLink) -> dict:
         "created_at": as_iso(link.created_at),
         "updated_at": as_iso(link.updated_at),
         "control": control_public(control) if control else None,
+    }
+
+
+def remediation_task_public(
+    task: RemediationTask, *, evidence_count: int | None = None
+) -> dict:
+    overdue = bool(
+        task.due_date is not None
+        and task.status not in {"done", "cancelled"}
+        and task.due_date < date.today()
+    )
+    payload = {
+        "id": task.id,
+        "engagement_id": task.engagement_id,
+        "risk_item_id": task.risk_item_id,
+        "code": task.code,
+        "title": task.title,
+        "description": task.description,
+        "control_id": task.control_id,
+        "owner": task.owner,
+        "owner_user_id": task.owner_user_id,
+        "priority": task.priority,
+        "status": task.status,
+        "due_date": as_date_iso(task.due_date),
+        "completed_at": as_iso(task.completed_at),
+        "notes": task.notes,
+        "risk_snapshot": task.risk_snapshot,
+        "is_overdue": overdue,
+        "created_by": task.created_by,
+        "created_at": as_iso(task.created_at),
+        "updated_at": as_iso(task.updated_at),
+    }
+    if evidence_count is not None:
+        payload["evidence_count"] = evidence_count
+    return payload
+
+
+def evidence_public(row: EvidenceFile) -> dict:
+    return {
+        "id": row.id,
+        "engagement_id": row.engagement_id,
+        "remediation_task_id": row.remediation_task_id,
+        "sha256": row.sha256,
+        "filename": row.filename,
+        "content_type": row.content_type,
+        "size_bytes": row.size_bytes,
+        "uploaded_by": row.uploaded_by,
+        "created_at": as_iso(row.created_at),
+        "updated_at": as_iso(row.updated_at),
     }
 
 
